@@ -38,7 +38,7 @@
 - [x] Add opt-in scheduled daily Telegram analytics delivery, in addition to event notifications and manual reports.
 - [ ] Validate scheduled analytics delivery against a real connected YouTube channel and Telegram bot.
 - [ ] Expand the workflow runner with additional vetted connectors, retry policies and per-connector permission scopes; current queue supports only agent tasks, content drafts and Telegram messages.
-- [ ] Move all departments to a shared production database and validate migrations/backups before public launch.
+- [x] AI, image, YouTube, integrations and workflow runs use the same configured database path; generated media uses the persistent service disk.\n- [ ] Migrate the shared SQLite database to the requested Neon PostgreSQL instance, add schema migrations and validate backups/restore before public launch.
 
 ## Not implemented — do not promise at launch
 
