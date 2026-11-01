@@ -418,31 +418,120 @@ async def reconcile_orders():
 
 @router.get("/analytics")
 def live_analytics():
+    """Summarize locally recorded fills and calculate matched spot P&L with FIFO.
+
+    Fees paid in USDT are included in realized P&L. Fees paid in another asset
+    are reported by asset but not converted without a trustworthy historical FX
+    price. Only locally recorded exchange fills are included.
+    """
     ensure_ops_tables()
     with db() as conn:
-        orders = conn.execute("SELECT exchange_name,symbol,side,quantity,executed_quantity,quote_quantity,status,created_at,response FROM live_orders ORDER BY created_at DESC LIMIT 500").fetchall()
+        orders = conn.execute(
+            "SELECT exchange_name,symbol,side,quantity,executed_quantity,quote_quantity,status,created_at,response "
+            "FROM live_orders ORDER BY created_at ASC LIMIT 5000"
+        ).fetchall()
+
     volume = Decimal("0")
     fees = {}
     by_status = {}
     by_exchange = {}
+    fills = []
     for row in orders:
-        value = decimal(row["quote_quantity"] or "0", "executed quote value")
-        volume += value
         by_status[row["status"]] = by_status.get(row["status"], 0) + 1
-        ex = row["exchange_name"] if "exchange_name" in row.keys() else "binance"
-        by_exchange[ex] = by_exchange.get(ex, 0) + 1
+        exchange = row["exchange_name"] if "exchange_name" in row.keys() else "binance"
+        by_exchange[exchange] = by_exchange.get(exchange, 0) + 1
         try:
             raw = json.loads(row["response"] or "{}")
-            fills = raw.get("fills", []) if isinstance(raw, dict) else []
-            for fill in fills:
-                asset = fill.get("commissionAsset") or fill.get("feeCurrency") or "unknown"
-                amount = fill.get("commission", fill.get("execFee", "0"))
-                fees[asset] = str(Decimal(fees.get(asset, "0")) + Decimal(str(amount)))
-        except (ValueError, InvalidOperation, TypeError):
-            pass
-    return {"orders_included": len(orders), "executed_quote_volume_usdt": str(volume),
-            "fees_by_asset": fees, "orders_by_status": by_status, "orders_by_exchange": by_exchange,
-            "warning": "This is order/fill analytics, not net profit. Fees in non-USDT assets are not converted. Only locally recorded orders are included."}
+        except (ValueError, TypeError):
+            raw = {}
+        raw_fills = raw.get("fills", []) if isinstance(raw, dict) else []
+        for fill in raw_fills:
+            try:
+                if exchange == "bybit":
+                    qty = decimal(fill.get("execQty", "0"), "fill quantity")
+                    price = decimal(fill.get("execPrice", "0"), "fill price")
+                    fee = decimal(fill.get("execFee", "0"), "fill fee")
+                    fee_asset = fill.get("feeCurrency") or "unknown"
+                    side = (fill.get("side") or row["side"]).upper()
+                    when = int(fill.get("execTime", 0) or 0)
+                else:
+                    qty = decimal(fill.get("qty", "0"), "fill quantity")
+                    price = decimal(fill.get("price", "0"), "fill price")
+                    fee = decimal(fill.get("commission", "0"), "fill fee")
+                    fee_asset = fill.get("commissionAsset") or "unknown"
+                    side = ("BUY" if fill.get("isBuyer") else "SELL").upper()
+                    when = int(fill.get("time", 0) or 0)
+                if qty <= 0 or price <= 0:
+                    continue
+                quote = decimal(fill.get("quoteQty", fill.get("execValue", str(qty * price))), "fill quote value")
+                volume += quote
+                fees[fee_asset] = str(Decimal(fees.get(fee_asset, "0")) + fee)
+                fills.append({"symbol": row["symbol"], "side": side, "qty": qty,
+                              "price": price, "fee": fee, "fee_asset": fee_asset,
+                              "time": when, "exchange": exchange})
+            except (HTTPException, InvalidOperation, TypeError, ValueError):
+                continue
+
+    # FIFO inventory is tracked independently per symbol. A SELL only realizes
+    # P&L against previously recorded BUY fills; unmatched quantity is reported,
+    # never silently treated as profit.
+    inventory = {}
+    realized_gross = Decimal("0")
+    realized_usdt_fees = Decimal("0")
+    unmatched_sells = {}
+    matched_quantity = Decimal("0")
+    for fill in sorted(fills, key=lambda item: item["time"]):
+        symbol = fill["symbol"]
+        lots = inventory.setdefault(symbol, [])
+        qty, price = fill["qty"], fill["price"]
+        if fill["side"] == "BUY":
+            lots.append({"qty": qty, "unit_cost": price})
+            if fill["fee_asset"] == "USDT":
+                # USDT buy fee increases acquisition cost.
+                lots[-1]["unit_cost"] = price + (fill["fee"] / qty)
+            continue
+        remaining = qty
+        while remaining > 0 and lots:
+            lot = lots[0]
+            matched = min(remaining, lot["qty"])
+            realized_gross += (price - lot["unit_cost"]) * matched
+            matched_quantity += matched
+            lot["qty"] -= matched
+            remaining -= matched
+            if lot["qty"] <= 0:
+                lots.pop(0)
+        if fill["fee_asset"] == "USDT":
+            realized_usdt_fees += fill["fee"]
+        if remaining > 0:
+            unmatched_sells[symbol] = str(Decimal(unmatched_sells.get(symbol, "0")) + remaining)
+
+    open_positions = {}
+    open_cost = Decimal("0")
+    for symbol, lots in inventory.items():
+        quantity = sum((lot["qty"] for lot in lots), Decimal("0"))
+        cost = sum((lot["qty"] * lot["unit_cost"] for lot in lots), Decimal("0"))
+        if quantity > 0:
+            open_positions[symbol] = {"quantity": str(quantity), "fifo_cost_usdt": str(cost),
+                                      "average_cost_usdt": str(cost / quantity)}
+            open_cost += cost
+
+    realized_net = realized_gross - realized_usdt_fees
+    return {
+        "orders_included": len(orders),
+        "fills_included": len(fills),
+        "executed_quote_volume_usdt": str(volume),
+        "fees_by_asset": fees,
+        "fifo_realized_gross_pnl_usdt": str(realized_gross),
+        "fifo_realized_net_pnl_usdt": str(realized_net),
+        "matched_sell_quantity_by_symbol": {"all_symbols": str(matched_quantity)},
+        "unmatched_sell_quantity_by_symbol": unmatched_sells,
+        "open_inventory_by_symbol": open_positions,
+        "open_inventory_fifo_cost_usdt": str(open_cost),
+        "orders_by_status": by_status,
+        "orders_by_exchange": by_exchange,
+        "accounting_scope": "FIFO on locally recorded spot fills only; no external/manual trades or deposits are included.",
+        "warning": "Fees paid in USDT are included in net realized P&L. Fees in other assets are listed but not converted. Unmatched sells are excluded from realized P&L. This is not a tax statement or a complete exchange account reconciliation."
+    }
 
 
 @router.post("/research/ema")
