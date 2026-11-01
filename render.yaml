@@ -30,6 +30,8 @@ services:
         generateValue: true
       - key: AI_API_KEY
         sync: false
+      - key: SECRET_ENCRYPTION_KEY
+        sync: false
       - key: BILLING_BASE_URL
         sync: false
       - key: BILLING_ENABLED
