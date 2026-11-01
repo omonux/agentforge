@@ -1,6 +1,7 @@
 import{useEffect,useState}from"react";import{apiFetch,API}from"./api";
 import{Plus,RefreshCw,ShieldCheck,Send,Sparkles,CheckCircle2,Clock3,Activity}from"lucide-react";
-import OmonuxAutoTrade from "./OmonuxAutoTrade";\nimport OmonuxMarketChart from "./OmonuxMarketChart";
+import OmonuxAutoTrade from "./OmonuxAutoTrade";
+import OmonuxMarketChart from "./OmonuxMarketChart";
 type Props={page:string;onNotice:(s:string)=>void};
 export default function WorkspaceModule({page,onNotice}:Props){
  const[items,I]=useState<any[]>([]),[busy,B]=useState(false),[name,N]=useState(""),[email,E]=useState(""),[company,C]=useState(""),[subject,S]=useState(""),[message,M]=useState(""),[priority,P]=useState("normal"),[title,T]=useState(""),[channel,H]=useState("youtube"),[trigger,G]=useState("New form submission"),[plan,L]=useState("Review the request, draft a response, and ask a human to approve before sending."),[symbol,Y]=useState("BTCUSD"),[note,Q]=useState(""),[closes,CL]=useState(""),[fast,F]=useState("10"),[slow,SL]=useState("30"),[capital,CA]=useState("10000"),[bt, BT]=useState<any>(null),[portfolio,PF]=useState<any>(null),[marketContext,MC]=useState(""),[marketAnalysis,MA]=useState(""),[analysisBusy,AB]=useState(false),[signals,SG]=useState<any[]>([]),[signalBusy,SB]=useState(false),[timeframe,TF]=useState("30m");
