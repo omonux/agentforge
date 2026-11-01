@@ -93,6 +93,44 @@ async def ask(agent,prompt):
 def health(): return {"status":"ok","ai_configured":bool(BASE and KEY and MODEL)}
 
 # --- AI provider diagnostics (never return credentials) ---
+@app.get("/api/v1/workspace/overview")
+def workspace_overview():
+ # One owner-only snapshot for the workspace command centre. Never expose secrets.
+ table_names = {
+  row["name"] for row in db().execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+ }
+ def count(table):
+  if table not in table_names: return 0
+  with db() as c: return int(c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+ youtube_connected = False
+ if "yt_settings" in table_names:
+  with db() as c:
+   row=c.execute("SELECT refresh_token FROM yt_settings WHERE id=1").fetchone()
+   youtube_connected=bool(row and row["refresh_token"])
+ image_ready=bool(os.getenv("IMAGE_API_KEY"))
+ youtube_oauth_ready=bool(os.getenv("YOUTUBE_CLIENT_ID") and os.getenv("YOUTUBE_CLIENT_SECRET"))
+ return {
+  "counts": {
+   "tasks":count("tasks"),"completed_tasks":count("tasks") if "tasks" not in table_names else 0,
+   "leads":count("leads"),"support_tickets":count("tickets"),
+   "content_items":count("content_items"),"workflow_plans":count("workflows"),
+   "image_assets":count("image_assets"),"youtube_drafts":count("yt_drafts"),
+   "paper_trades":count("paper_trades"),"watchlist_symbols":count("watchlist")
+  },
+  "departments": [
+   {"id":"agents","name":"AI Agents","page":"AI Agents","state":"ready" if bool(BASE and KEY and MODEL) else "needs_setup","detail":"AI provider configured" if bool(BASE and KEY and MODEL) else "Configure and test the AI provider"},
+   {"id":"crm","name":"Sales Pipeline","page":"Sales Pipeline","state":"ready","detail":f"{count('leads')} saved leads"},
+   {"id":"support","name":"Customer Support","page":"Customer Support","state":"ready","detail":f"{count('tickets')} saved tickets"},
+   {"id":"content","name":"Content Studio","page":"Content Studio","state":"ready","detail":f"{count('content_items')} content records; draft and review"},
+   {"id":"workflows","name":"Automations","page":"Automations","state":"limited","detail":"Workflow plans are saved; general execution connectors are not enabled"},
+   {"id":"images","name":"Image AI Studio","page":"Image AI Studio","state":"ready" if image_ready else "needs_setup","detail":"Image provider key configured" if image_ready else "Configure IMAGE_API_KEY"},
+   {"id":"youtube","name":"YouTube Automation","page":"YouTube Automation","state":"ready" if youtube_connected else ("needs_setup" if youtube_oauth_ready else "needs_setup"),"detail":"Channel connected" if youtube_connected else "Configure Google OAuth and connect a channel"},
+   {"id":"trading","name":"Omonux Trading","page":"Omonux Trading","state":"limited","detail":"Market research and paper trading; live execution remains separately guarded"},
+   {"id":"billing","name":"Billing","page":"Billing","state":"ready" if os.getenv("BILLING_ENABLED","false").lower()=="true" else "disabled","detail":"Billing enabled by environment" if os.getenv("BILLING_ENABLED","false").lower()=="true" else "Billing is disabled by default"}
+  ],
+  "security":{"owner_workspace":True,"live_trading_enabled":False,"external_actions_require_approval":True}
+ }
+
 @app.get("/api/v1/ai/status")
 def ai_status():
  configured=bool(BASE and KEY and MODEL)
