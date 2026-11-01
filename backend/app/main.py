@@ -292,10 +292,11 @@ def edit_ticket(ident:str,x:TicketStatus):
 async def draft_reply(ident:str):
  ticket=one("SELECT * FROM tickets WHERE id=?",(ident,))
  if not ticket: raise HTTPException(404,"Ticket not found.")
- result=await ask("support",f"Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.
-Customer: {ticket['customer']}
-Subject: {ticket['subject']}
-Message: {ticket['message']}")
+ prompt=("Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.\n"
+         +f"Customer: {ticket['customer']}\n"
+         +f"Subject: {ticket['subject']}\n"
+         +f"Message: {ticket['message']}")
+ result=await ask("support",prompt)
  with db() as c: c.execute("UPDATE tickets SET reply_draft=?,updated=? WHERE id=?",(result,stamp(),ident))
  return one("SELECT * FROM tickets WHERE id=?",(ident,))
 # --- Content production board: draft -> review -> approved; publishing is intentionally not automated ---
