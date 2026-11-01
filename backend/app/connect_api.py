@@ -27,7 +27,8 @@ SERVICES = [
         {"name":"image_model","label":"Image model","kind":"text","required":True,"help":"Example: gpt-image-1"}]},
     {"id":"video","name":"AI Video Generation","group":"Media generation","description":"Renders original video from approved scripts. A compatible Replicate model is required.","testable":True,"fields":[
         {"name":"replicate_api_token","label":"Replicate API token","kind":"secret","required":True,"help":"Create a token in your Replicate account."},
-        {"name":"replicate_model","label":"Replicate model slug","kind":"text","required":True,"help":"Format owner/model. The model must accept a prompt and return a video."}]},
+        {"name":"replicate_model","label":"Replicate model slug","kind":"text","required":True,"help":"Format owner/model. The model must accept a prompt and return a video."},
+        {"name":"replicate_input_json","label":"Video model input JSON","kind":"text","required":False,"help":"Optional model-specific inputs. Suggested vertical 30-second defaults: {\"aspect_ratio\":\"9:16\",\"duration\":30}. Adjust keys to match your chosen model."}]},
     {"id":"youtube","name":"YouTube & Google OAuth","group":"Publishing and analytics","description":"Connects your channel for trend discovery, approval-gated uploads and permitted channel analytics.","testable":True,"fields":[
         {"name":"youtube_client_id","label":"Google OAuth client ID","kind":"secret","required":True,"help":"Create an OAuth Web application in Google Cloud Console. Grant YouTube Data API and YouTube Analytics API access."},
         {"name":"youtube_client_secret","label":"Google OAuth client secret","kind":"secret","required":True,"help":"Keep this private; never paste it into chat. Reconnect the channel after granting the added Analytics scopes."},
@@ -65,7 +66,7 @@ SERVICES = [
 ENV_FALLBACKS = {
     "ai_api_key":"AI_API_KEY","ai_base_url":"AI_BASE_URL","ai_model":"AI_MODEL",
     "image_api_key":"IMAGE_API_KEY","image_base_url":"IMAGE_BASE_URL","image_model":"IMAGE_MODEL",
-    "replicate_api_token":"VIDEO_API_KEY","replicate_model":"VIDEO_MODEL",
+    "replicate_api_token":"VIDEO_API_KEY","replicate_model":"VIDEO_MODEL","replicate_input_json":"VIDEO_INPUT_JSON",
     "youtube_client_id":"YOUTUBE_CLIENT_ID","youtube_client_secret":"YOUTUBE_CLIENT_SECRET",
     "youtube_redirect_uri":"YOUTUBE_REDIRECT_URI","youtube_region":"YOUTUBE_REGION",
     "telegram_bot_token":"","telegram_chat_id":"",
