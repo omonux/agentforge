@@ -5,6 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from .omonux_integrations import secret_or_env
+from . import main as app_main
 
 router = APIRouter(prefix="/api/v1/images", tags=["Image AI"])
 PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").lower()
@@ -19,8 +20,9 @@ STORE = Path(os.getenv("IMAGE_STORAGE_DIR", "./storage/generated_images")).resol
 MAX_BYTES = int(os.getenv("IMAGE_MAX_UPLOAD_BYTES", "12000000"))
 
 def connect():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
+    db_path = Path(os.getenv("DATABASE_PATH", str(app_main.DB)))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(db_path); c.row_factory = sqlite3.Row
     c.execute("""CREATE TABLE IF NOT EXISTS image_assets(
       id TEXT PRIMARY KEY, prompt TEXT NOT NULL, model TEXT NOT NULL,
       size TEXT NOT NULL, quality TEXT NOT NULL, filename TEXT NOT NULL,
