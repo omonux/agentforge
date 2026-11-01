@@ -15,7 +15,6 @@ def image_config():
     model = secret_or_env("image_model", "IMAGE_MODEL", "gpt-image-1")
     base = secret_or_env("image_base_url", "IMAGE_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     return key, model, base
-DB = Path(os.getenv("DATABASE_PATH", "./agentforge.db"))
 STORE = Path(os.getenv("IMAGE_STORAGE_DIR", "./storage/generated_images")).resolve()
 MAX_BYTES = int(os.getenv("IMAGE_MAX_UPLOAD_BYTES", "12000000"))
 
