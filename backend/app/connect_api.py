@@ -29,9 +29,9 @@ SERVICES = [
         {"name":"replicate_api_token","label":"Replicate API token","kind":"secret","required":True,"help":"Create a token in your Replicate account."},
         {"name":"replicate_model","label":"Replicate model slug","kind":"text","required":True,"help":"Format owner/model. The model must accept a prompt and return a video."}]},
     {"id":"youtube","name":"YouTube & Google OAuth","group":"Publishing and analytics","description":"Connects your channel for trend discovery, approval-gated uploads and permitted channel analytics.","testable":True,"fields":[
-        {"name":"youtube_client_id","label":"Google OAuth client ID","kind":"secret","required":True,"help":"Create an OAuth Web application in Google Cloud Console."},
-        {"name":"youtube_client_secret","label":"Google OAuth client secret","kind":"secret","required":True,"help":"Keep this private; never paste it into chat."},
-        {"name":"youtube_redirect_uri","label":"OAuth redirect URI","kind":"text","required":True,"help":"Must exactly match your Google Cloud OAuth redirect URI."},
+        {"name":"youtube_client_id","label":"Google OAuth client ID","kind":"secret","required":True,"help":"Create an OAuth Web application in Google Cloud Console. Grant YouTube Data API and YouTube Analytics API access."},
+        {"name":"youtube_client_secret","label":"Google OAuth client secret","kind":"secret","required":True,"help":"Keep this private; never paste it into chat. Reconnect the channel after granting the added Analytics scopes."},
+        {"name":"youtube_redirect_uri","label":"OAuth redirect URI","kind":"text","required":True,"help":"Must exactly match your Google Cloud OAuth redirect URI. Include the deployed host URL."},
         {"name":"youtube_region","label":"Trend region code","kind":"text","required":False,"help":"Example: NG"}]},
     {"id":"telegram","name":"Telegram Notifications","group":"Publishing and alerts","description":"Sends approval, render, publishing and supported channel-metric notifications to your Telegram chat.","testable":True,"fields":[
         {"name":"telegram_bot_token","label":"Telegram bot token","kind":"secret","required":True,"help":"Create a bot with BotFather."},
@@ -40,7 +40,7 @@ SERVICES = [
         {"name":"elevenlabs_api_key","label":"ElevenLabs API key","kind":"secret","required":True,"help":"Your ElevenLabs API key."},
         {"name":"elevenlabs_voice_id","label":"Voice ID","kind":"text","required":True,"help":"The voice you have permission to use."},
         {"name":"elevenlabs_model","label":"Voice model","kind":"text","required":False,"help":"Default: eleven_multilingual_v2"}]},
-    {"id":"payments","name":"Payments","group":"Business services","description":"Paystack and OPay hosted checkout. Keep billing disabled until merchant sandbox verification is complete.","testable":True,"fields":[
+    {"id":"payments","name":"Payments","group":"Business services","description":"Paystack and OPay hosted checkout. Checkout remains disabled until BILLING_ENABLED is deliberately enabled in server settings after sandbox verification.","testable":True,"fields":[
         {"name":"paystack_secret_key","label":"Paystack secret key","kind":"secret","required":False,"help":"Use a test key for sandbox validation; never enable live billing until reviewed."},
         {"name":"paystack_public_key","label":"Paystack public key","kind":"secret","required":False,"help":"Public checkout identifier; optional for the current hosted flow."},\n        {"name":"paystack_pro_monthly_plan_code","label":"Paystack Pro plan code","kind":"text","required":False,"help":"Optional recurring plan code."},\n        {"name":"paystack_business_monthly_plan_code","label":"Paystack Business plan code","kind":"text","required":False,"help":"Optional recurring plan code."},
         {"name":"opay_public_key","label":"OPay public key","kind":"secret","required":False,"help":"Merchant credential from your approved OPay account."},
