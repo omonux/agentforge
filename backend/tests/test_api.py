@@ -181,6 +181,10 @@ def test_omonux_chart_scan_validates_upload_and_ai_configuration(tmp_path, monke
 
 def test_omonux_chart_scan_requires_authentication(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB", tmp_path / "chart-auth.db")
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret-that-is-long-enough-123456")
+    monkeypatch.setenv("ADMIN_PASSWORD", "strong-test-password-12345")
+    monkeypatch.setenv("ADMIN_PASSWORD_SALT", "test-salt-0123456789abcdef")
+    monkeypatch.setenv("COOKIE_SECURE", "false")
     with TestClient(main.app) as client:
         response = client.post(
             "/api/v1/trading/chart-scan",
