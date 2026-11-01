@@ -55,7 +55,11 @@ SERVICES = [
         {"name":"binance_api_key","label":"Binance testnet API key","kind":"secret","required":False,"help":"Use testnet credentials with withdrawals disabled."},
         {"name":"binance_api_secret","label":"Binance testnet API secret","kind":"secret","required":False,"help":"Never use a withdrawal-enabled key."},
         {"name":"bybit_api_key","label":"Bybit testnet API key","kind":"secret","required":False,"help":"Use testnet credentials only."},
-        {"name":"bybit_api_secret","label":"Bybit testnet API secret","kind":"secret","required":False,"help":"Never use a withdrawal-enabled key."},\n        {"name":"binance_live_api_key","label":"Binance LIVE read-only API key","kind":"secret","required":False,"help":"Only use a separate read-only key. Live order execution remains disabled here."},\n        {"name":"binance_live_api_secret","label":"Binance LIVE read-only API secret","kind":"secret","required":False,"help":"Use IP restrictions and disable withdrawals."},\n        {"name":"bybit_live_api_key","label":"Bybit LIVE read-only API key","kind":"secret","required":False,"help":"Only use a separate read-only key. Live order execution remains disabled here."},\n        {"name":"bybit_live_api_secret","label":"Bybit LIVE read-only API secret","kind":"secret","required":False,"help":"Use IP restrictions and disable withdrawals."}]},
+        {"name":"bybit_api_secret","label":"Bybit testnet API secret","kind":"secret","required":False,"help":"Never use a withdrawal-enabled key."},
+        {"name":"binance_live_api_key","label":"Binance LIVE read-only API key","kind":"secret","required":False,"help":"Only use a separate read-only key. Live order execution remains disabled here."},
+        {"name":"binance_live_api_secret","label":"Binance LIVE read-only API secret","kind":"secret","required":False,"help":"Use IP restrictions and disable withdrawals."},
+        {"name":"bybit_live_api_key","label":"Bybit LIVE read-only API key","kind":"secret","required":False,"help":"Only use a separate read-only key. Live order execution remains disabled here."},
+        {"name":"bybit_live_api_secret","label":"Bybit LIVE read-only API secret","kind":"secret","required":False,"help":"Use IP restrictions and disable withdrawals."}]},
 ]
 
 ENV_FALLBACKS = {
@@ -71,7 +75,8 @@ ENV_FALLBACKS = {
     "opay_public_key":"OPAY_PUBLIC_KEY","opay_secret_key":"OPAY_SECRET_KEY",
     "opay_merchant_id":"OPAY_MERCHANT_ID","opay_api_base_url":"OPAY_API_BASE_URL",
     "opay_country":"OPAY_COUNTRY","opay_currency":"OPAY_CURRENCY",
-    "binance_api_key":"","binance_api_secret":"","bybit_api_key":"","bybit_api_secret":"",\n    "binance_live_api_key":"","binance_live_api_secret":"","bybit_live_api_key":"","bybit_live_api_secret":"",
+    "binance_api_key":"","binance_api_secret":"","bybit_api_key":"","bybit_api_secret":"",
+    "binance_live_api_key":"","binance_live_api_secret":"","bybit_live_api_key":"","bybit_live_api_secret":"",
 }
 
 class SecretInput(BaseModel):
@@ -140,7 +145,7 @@ async def test_connection(service_id: str):
     service = next((x for x in SERVICES if x["id"]==service_id),None)
     if not service:
         raise HTTPException(404,"Unknown integration.")
-    if not service["testable"] and service_id!="trading":
+    if not service["testable"]:
         _save_check(service_id,"manual","Credentials are stored encrypted. This integration is restricted to testnet/manual verification.")
         return {"service":service_id,"status":"manual","message":"Credentials saved. This service is not activated by a credential test."}
     try:
