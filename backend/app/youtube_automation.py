@@ -296,7 +296,7 @@ async def render_draft(draft_id:str):
  with conn() as c:
   row=c.execute("SELECT * FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
   if not row: raise HTTPException(404,"Draft not found.")
-  changed=c.execute("UPDATE yt_drafts SET status='rendering',error=NULL WHERE id=? AND status='script_ready'",(draft_id,))
+  changed=c.execute("UPDATE yt_drafts SET status='rendering',error=NULL WHERE id=? AND status IN ('script_ready','render_failed')",(draft_id,))
   if changed.rowcount!=1: raise HTTPException(409,"This draft is not available to start a new render.")
  try:
   async with httpx.AsyncClient(timeout=75) as h:
