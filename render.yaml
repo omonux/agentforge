@@ -30,3 +30,29 @@ services:
         generateValue: true
       - key: AI_API_KEY
         sync: false
+      - key: BILLING_BASE_URL
+        sync: false
+      - key: BILLING_LIVE_ENABLED
+        value: "false"
+      - key: AGENTFORGE_PRO_MONTHLY_NGN
+        sync: false
+      - key: AGENTFORGE_BUSINESS_MONTHLY_NGN
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PRO_MONTHLY_PLAN_CODE
+        sync: false
+      - key: PAYSTACK_BUSINESS_MONTHLY_PLAN_CODE
+        sync: false
+      - key: OPAY_API_BASE_URL
+        value: https://sandboxapi.opaycheckout.com
+      - key: OPAY_COUNTRY
+        value: NG
+      - key: OPAY_CURRENCY
+        value: NGN
+      - key: OPAY_PUBLIC_KEY
+        sync: false
+      - key: OPAY_SECRET_KEY
+        sync: false
+      - key: OPAY_MERCHANT_ID
+        sync: false
