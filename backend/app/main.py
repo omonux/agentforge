@@ -565,3 +565,7 @@ async def auto_trade_run_once():
    auto_event("CYCLE_ERROR",symbol,str(e))
  with db() as c: c.execute("UPDATE auto_trade_settings SET updated=? WHERE id=1",(stamp(),))
  return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
+
+# OMONUX legacy chart-image analysis, protected by the workspace auth middleware above.
+from .omonux_chart_analysis import router as omonux_chart_router
+app.include_router(omonux_chart_router)
