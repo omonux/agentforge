@@ -117,7 +117,8 @@ def workspace_overview():
    row=c.execute("SELECT id FROM yt_settings WHERE id=1").fetchone()
    youtube_connected=bool(row and read_integration_secret("youtube_refresh_token"))
  image_ready=bool(secret_or_env("image_api_key","IMAGE_API_KEY") and secret_or_env("image_base_url","IMAGE_BASE_URL","https://api.openai.com/v1") and secret_or_env("image_model","IMAGE_MODEL","gpt-image-1"))
- youtube_oauth_ready=bool(secret_or_env("youtube_client_id","YOUTUBE_CLIENT_ID") and secret_or_env("youtube_client_secret","YOUTUBE_CLIENT_SECRET"))\n video_ready=bool(secret_or_env("replicate_api_token","VIDEO_API_KEY") and secret_or_env("replicate_model","VIDEO_MODEL"))
+ youtube_oauth_ready=bool(secret_or_env("youtube_client_id","YOUTUBE_CLIENT_ID") and secret_or_env("youtube_client_secret","YOUTUBE_CLIENT_SECRET"))
+ video_ready=bool(secret_or_env("replicate_api_token","VIDEO_API_KEY") and secret_or_env("replicate_model","VIDEO_MODEL"))
  billing_enabled=os.getenv("BILLING_ENABLED","false").lower()=="true"
  ai_base,ai_key,ai_model=current_ai_config()
  ai_ready=bool(ai_base and ai_key and ai_model)
@@ -128,7 +129,10 @@ def workspace_overview():
    "leads":count("leads"),"support_tickets":count("tickets"),
    "content_items":count("content_items"),"workflow_plans":count("workflows"),
    "image_assets":count("image_assets"),"youtube_drafts":count("yt_drafts"),
-   "paper_trades":count("paper_trades"),"watchlist_symbols":count("watchlist"),\n   "workflow_runs":count("workflow_runs"),"pending_workflow_approvals":count("workflow_runs","status='awaiting_approval'"),\n   "completed_workflow_runs":count("workflow_runs","status='completed'"),\n   "published_youtube_videos":count("yt_drafts","status='published'"),"videos_awaiting_approval":count("yt_drafts","status='ready_for_approval'")
+   "paper_trades":count("paper_trades"),"watchlist_symbols":count("watchlist"),
+   "workflow_runs":count("workflow_runs"),"pending_workflow_approvals":count("workflow_runs","status='awaiting_approval'"),
+   "completed_workflow_runs":count("workflow_runs","status='completed'"),
+   "published_youtube_videos":count("yt_drafts","status='published'"),"videos_awaiting_approval":count("yt_drafts","status='ready_for_approval'")
   },
   "departments": [
    {"id":"agents","name":"AI Agents","page":"AI Agents","state":"ready" if ai_ready else "needs_setup","detail":"AI provider configured" if ai_ready else "Configure and test the AI provider"},
@@ -275,7 +279,10 @@ def edit_ticket(ident:str,x:TicketStatus):
 async def draft_reply(ident:str):
  ticket=one("SELECT * FROM tickets WHERE id=?",(ident,))
  if not ticket: raise HTTPException(404,"Ticket not found.")
- result=await ask("support",f"Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.\nCustomer: {ticket['customer']}\nSubject: {ticket['subject']}\nMessage: {ticket['message']}")
+ result=await ask("support",f"Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.
+Customer: {ticket['customer']}
+Subject: {ticket['subject']}
+Message: {ticket['message']}")
  with db() as c: c.execute("UPDATE tickets SET reply_draft=?,updated=? WHERE id=?",(result,stamp(),ident))
  return one("SELECT * FROM tickets WHERE id=?",(ident,))
 # --- Content production board: draft -> review -> approved; publishing is intentionally not automated ---
@@ -437,8 +444,12 @@ async def trading_analysis(x:TradingAnalysisIn):
  prompt=("Provide an educational, risk-first market scenario analysis using ONLY the market information supplied below. "
  "Do not invent live prices, news, indicators or events. Do not tell the user to buy, sell or use leverage. "
  "Separate observed inputs from assumptions. Explain bullish, bearish and neutral scenarios, invalidation conditions, "
- "missing data, and risk-management questions. State clearly that this is not personalized financial advice.\n"
- f"Symbol: {x.symbol.upper()}\nTimeframe: {x.timeframe}\nUser-supplied market context:\n{x.market_context}")
+ "missing data, and risk-management questions. State clearly that this is not personalized financial advice.
+"
+ f"Symbol: {x.symbol.upper()}
+Timeframe: {x.timeframe}
+User-supplied market context:
+{x.market_context}")
  result=await ask("research",prompt)
  return {"symbol":x.symbol.upper(),"timeframe":x.timeframe,"analysis":result,"data_source":"user_supplied_context","disclaimer":"Educational scenario analysis only. Not a trading signal, personalized financial advice or a guarantee."}
 
