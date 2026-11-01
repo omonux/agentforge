@@ -7,3 +7,21 @@
 .authcard label{display:block;color:#bdc8d9;font-size:10px;margin:16px 0}.authcard input{display:block;width:100%;margin-top:8px;padding:13px 14px;background:#0a1321;border:1px solid #35445c;border-radius:9px;color:#f5f7ff;font-size:12px;outline:none}.authcard input:focus{border-color:#8b7cff;box-shadow:0 0 0 3px #8b7cff22}.authcard input[readonly]{color:#8291a8;background:#111c2d}
 .authsubmit{width:100%;justify-content:center;margin-top:7px;padding:13px}.autherror{background:#472a35;border:1px solid #75404c;color:#ffb5bd;border-radius:8px;padding:10px;font-size:10px;margin:12px 0}
 .authfoot{display:flex;align-items:center;justify-content:center;gap:7px;border-top:1px solid #2a3850;margin-top:25px;padding-top:18px;color:#8d9bb2;font-size:9px}.authfoot svg{color:#70dcb7}
+
+/* Omonux market intelligence workspace */
+.signaltools{display:flex;align-items:center;gap:8px}
+.signaltools select{background:#0a1321;border:1px solid #2b3a50;color:#dce5f4;border-radius:7px;padding:8px;font-size:10px}
+.signaltools button{display:inline-flex;align-items:center;gap:6px}
+.signalgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
+.signalcard{min-width:0;padding:14px;border:1px solid #2b3a50;border-radius:9px;background:linear-gradient(145deg,#172438,#101a2a)}
+.signalcardhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
+.signalcardhead>b{font:600 12px 'Space Grotesk'}
+.signalbadge{font-size:8px;font-weight:800;letter-spacing:.8px;padding:5px 7px;border-radius:5px;background:#30384a;color:#b6c3d7}
+.signalbadge.buy{background:#173c35;color:#75dfb9}.signalbadge.sell{background:#472a35;color:#f2a2aa}.signalbadge.hold{background:#3b3422;color:#e8cb8b}
+.signalcard>strong{font:600 21px 'Space Grotesk';display:block}
+.signalcard>small{display:block;color:#8e9cb2;font-size:9px;margin-top:5px;line-height:1.5}
+.signalindicators{display:flex;justify-content:space-between;gap:6px;border-top:1px solid #2b3a50;border-bottom:1px solid #2b3a50;margin:12px 0;padding:9px 0}
+.signalindicators span{font-size:8px;color:#8e9cb2}.signalindicators b{display:block;color:#e4eaf5;font-size:9px;margin-top:4px}
+.portfoliohead h3{margin:0 0 4px}
+@media(max-width:900px){.signalgrid{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.signalgrid{grid-template-columns:1fr}.signaltools{flex-wrap:wrap}.signaltools select{max-width:90px}}
