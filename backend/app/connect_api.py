@@ -6,15 +6,10 @@ leave this module after a save operation.
 """
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-
-from .omonux_integrations import (
-    ALLOWED_SECRET_NAMES, delete_secret if False else read_secret,
-)
 
 from .omonux_integrations import ALLOWED_SECRET_NAMES, read_secret, store_secret, secret_or_env
 from .main import db
