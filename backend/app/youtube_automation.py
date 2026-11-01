@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from .omonux_integrations import secret_or_env, read_secret, store_secret, send_telegram_message
+from . import main as app_main
 
 router=APIRouter(prefix="/api/v1/youtube",tags=["YouTube Automation"])
 DB=Path(os.getenv("DATABASE_PATH","./agentforge.db"))
@@ -31,7 +32,8 @@ SCOPES="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.co
 
 def now(): return datetime.now(timezone.utc).isoformat()
 def conn():
- DB.parent.mkdir(parents=True,exist_ok=True); c=sqlite3.connect(DB); c.row_factory=sqlite3.Row
+ db_path=Path(os.getenv("DATABASE_PATH",str(app_main.DB)))
+ db_path.parent.mkdir(parents=True,exist_ok=True); c=sqlite3.connect(db_path); c.row_factory=sqlite3.Row
  c.execute("""CREATE TABLE IF NOT EXISTS yt_settings(id INTEGER PRIMARY KEY CHECK(id=1),access_token TEXT,refresh_token TEXT,expires_at TEXT,channel_title TEXT,channel_id TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_drafts(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,script TEXT NOT NULL,topic TEXT NOT NULL,video_path TEXT,thumbnail_path TEXT,status TEXT NOT NULL,privacy TEXT NOT NULL,created TEXT NOT NULL,published_url TEXT,published_at TEXT,error TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_oauth_states(state TEXT PRIMARY KEY,created TEXT NOT NULL)""")
@@ -209,11 +211,16 @@ async def maybe_send_daily_analytics_report():
  if not (read_secret("telegram_bot_token") and read_secret("telegram_chat_id")): return False
  report=await fetch_channel_analytics(28); totals=report["totals"]
  revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: unavailable for this channel/permission"
- message=("AgentForge daily YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\n"
-          +"Views: "+str(totals["views"])+"\n"
-          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\n"
-          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\n"
-          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\n"
+ message=("AgentForge daily YouTube report ("+report["start_date"]+" to "+report["end_date"]+")
+"
+          +"Views: "+str(totals["views"])+"
+"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"
+"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"
+"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"
+"
           +revenue)
  sent=await send_telegram_message(message)
  if sent:
@@ -226,11 +233,16 @@ async def send_analytics_to_telegram(days:int=28):
  report=await fetch_channel_analytics(days)
  totals=report["totals"]
  revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: not available (check monetization and Google Analytics permission)"
- message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\n"
-          +"Views: "+str(totals["views"])+"\n"
-          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\n"
-          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\n"
-          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\n"
+ message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")
+"
+          +"Views: "+str(totals["views"])+"
+"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"
+"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"
+"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"
+"
           +revenue)
  sent=await send_telegram_message(message)
  if not sent: raise HTTPException(409,"Configure and test Telegram in Connect API first.")
@@ -273,9 +285,13 @@ def _captions(script:str):
  cursor=0.0; parts=[]
  for index,sentence in enumerate(sentences):
   span=duration*max(1,len(sentence.split()))/total_words
-  parts.append(f"{index+1}\n{_srt_time(cursor)} --> {_srt_time(cursor+span)}\n{sentence}\n")
+  parts.append(f"{index+1}
+{_srt_time(cursor)} --> {_srt_time(cursor+span)}
+{sentence}
+")
   cursor+=span
- return "\n".join(parts)
+ return "
+".join(parts)
 
 @router.post("/drafts/{draft_id}/voice")
 async def generate_voice(draft_id:str):
@@ -434,7 +450,9 @@ async def approve_publish(draft_id:str,req:Approve):
  if row["status"]!="ready_for_approval" or not row["video_path"] or not Path(row["video_path"]).is_file():
   raise HTTPException(409,"Only a fully rendered video awaiting approval can be uploaded.")
  tok=await access_token()
- metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"\n\n"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
+ metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"
+
+"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
  with conn() as c:
   changed=c.execute("UPDATE yt_drafts SET status='uploading',error=NULL WHERE id=? AND status='ready_for_approval'",(draft_id,))
   if changed.rowcount!=1: raise HTTPException(409,"This draft is already being uploaded or has already been processed.")
