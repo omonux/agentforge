@@ -5,7 +5,6 @@ Only presence/status metadata is returned to the browser; plaintext values never
 leave this module after a save operation.
 """
 import os
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,9 +17,9 @@ from .omonux_integrations import (
 )
 
 from .omonux_integrations import ALLOWED_SECRET_NAMES, read_secret, store_secret, secret_or_env
+from .main import db
 
 router = APIRouter(prefix="/api/v1/connect-api", tags=["Connect API"])
-DB = Path(os.getenv("DATABASE_PATH", "./agentforge.db"))
 
 SERVICES = [
     {"id":"ai","name":"AI Agent Provider","group":"Core AI","description":"Powers the five specialist agents, research, writing and task execution.","testable":True,"fields":[
@@ -83,15 +82,14 @@ def _present(name: str) -> bool:
     return bool(secret_or_env(name, env) if env else read_secret(name))
 
 def _ensure_checks():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB, timeout=15) as conn:
+    with db() as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS integration_checks(
             service TEXT PRIMARY KEY, status TEXT NOT NULL, message TEXT NOT NULL,
             checked_at TEXT NOT NULL)""")
 
 def _save_check(service: str, status: str, message: str):
     _ensure_checks()
-    with sqlite3.connect(DB, timeout=15) as conn:
+    with db() as conn:
         conn.execute("""INSERT INTO integration_checks(service,status,message,checked_at)
             VALUES(?,?,?,?) ON CONFLICT(service) DO UPDATE SET
             status=excluded.status,message=excluded.message,checked_at=excluded.checked_at""",
@@ -100,9 +98,9 @@ def _save_check(service: str, status: str, message: str):
 @router.get("")
 def list_connections():
     _ensure_checks()
-    with sqlite3.connect(DB, timeout=15) as conn:
-        checks = {r[0]: {"status":r[1],"message":r[2],"checked_at":r[3]}
-                  for r in conn.execute("SELECT service,status,message,checked_at FROM integration_checks")}
+    with db() as conn:
+        checks = {r["service"]: {"status":r["status"],"message":r["message"],"checked_at":r["checked_at"]}
+                  for r in conn.execute("SELECT service,status,message,checked_at FROM integration_checks").fetchall()}
     groups = []
     for service in SERVICES:
         fields = []
@@ -132,7 +130,7 @@ def remove_connection_secret(name: str):
         raise HTTPException(400,"This credential is not in the supported Connect API registry.")
     from .omonux_integrations import ensure_table
     ensure_table()
-    with sqlite3.connect(DB,timeout=15) as conn:
+    with db() as conn:
         conn.execute("DELETE FROM integration_secrets WHERE name=?",(name,))
     return {"deleted":True,"name":name}
 
