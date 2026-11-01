@@ -557,5 +557,6 @@ def test_live_analytics_fifo_realized_pnl_and_open_inventory(tmp_path, monkeypat
         assert float(data["fifo_realized_gross_pnl_usdt"]) == 19.5
         assert float(data["fifo_realized_net_pnl_usdt"]) == 19.0
         assert data["open_inventory_by_symbol"]["BTCUSDT"]["quantity"] == "1"
+        assert data["matched_sell_quantity_by_symbol"]["BTCUSDT"] == "1"
         assert float(data["open_inventory_fifo_cost_usdt"]) == 100.5
 
