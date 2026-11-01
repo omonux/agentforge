@@ -81,7 +81,8 @@ def status():
  row=token_row()
  client_id,client_secret,_redirect,region=youtube_config()
  video_key,video_model,video_provider=video_config()
- return {"configured":bool(client_id and client_secret),"connected":bool(row and read_secret("youtube_refresh_token")),"channel":row["channel_title"] if row else None,"region":region,"video_generation_configured":bool(video_key and video_model),"video_provider":video_provider}
+ voice_key,voice_id,_voice_model=voice_config()
+ return {"configured":bool(client_id and client_secret),"connected":bool(row and read_secret("youtube_refresh_token")),"channel":row["channel_title"] if row else None,"region":region,"video_generation_configured":bool(video_key and video_model),"video_provider":video_provider,"voice_generation_configured":bool(voice_key and voice_id)}
 @router.get("/oauth/start")
 def oauth_start():
  client_id,client_secret,redirect_uri,_region=youtube_config()
