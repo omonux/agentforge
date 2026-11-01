@@ -5,7 +5,7 @@ import { API, apiFetch } from "./api";
 type Plan = { id: string; name: string; amount_minor: number | null; recurring_available: boolean };
 type BillingInfo = { paystack_configured: boolean; opay_configured: boolean; checkout_enabled: boolean; live_payments_enabled: boolean; customer_entitlements_enforced: boolean };
 
-export default function BillingModule({ onNotice }: { onNotice: (message: string) => void }) {
+export default function BillingModule() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [info, setInfo] = useState<BillingInfo | null>(null);
   const [email, setEmail] = useState("");
