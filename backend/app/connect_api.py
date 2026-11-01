@@ -102,7 +102,7 @@ def list_connections():
         for field in service["fields"]:
             fields.append({**field,"configured":_present(field["name"])})
         required = [f for f in fields if f["required"]]
-        configured = all(f["configured"] for f in required)
+        configured = all(f["configured"] for f in required) if required else any(f["configured"] for f in fields)
         groups.append({**service,"configured":configured,"fields":fields,
                        "check":checks.get(service["id"])})
     return {"encryption_ready":bool(os.getenv("SECRET_ENCRYPTION_KEY","").strip()),
