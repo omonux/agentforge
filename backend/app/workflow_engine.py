@@ -1,8 +1,4 @@
-"""Approval-gated workflow runner with an allowlisted action set.
-
-This deliberately does not execute arbitrary shell commands, SQL, URLs, payments,
-trades, or unreviewed publishing actions.
-"""
+"""Persistent, approval-gated workflow queue with a strict action allowlist."""
 import json
 import uuid
 from fastapi import APIRouter, HTTPException
@@ -50,16 +46,14 @@ def parse_plan(raw):
    clean.append({"type":kind,"title":title[:180],"script":script[:12000],"channel":channel})
   elif kind=="telegram_message":
    message=item.get("message")
-   if not isinstance(message,str) or not message.strip():
-    raise HTTPException(400,"telegram_message requires message text.")
+   if not isinstance(message,str) or not message.strip(): raise HTTPException(400,"telegram_message requires message text.")
    clean.append({"type":kind,"message":message[:3000]})
   else:
    raise HTTPException(400,"Unsupported action type. Allowed: agent_task, content_draft, telegram_message.")
  return clean
 
 def get_workflow(workflow_id):
- with db() as c:
-  row=c.execute("SELECT * FROM workflows WHERE id=?",(workflow_id,)).fetchone()
+ with db() as c: row=c.execute("SELECT * FROM workflows WHERE id=?",(workflow_id,)).fetchone()
  return dict(row) if row else None
 
 @router.post("")
@@ -73,13 +67,12 @@ def create_workflow_run(req:RunRequest):
   c.execute("INSERT INTO workflow_runs(id,workflow_id,status,input_text,actions_json,created,updated) VALUES(?,?,?,?,?,?,?)",
    (ident,req.workflow_id,"awaiting_approval",req.input_text,json.dumps(actions),now,now))
  return {"id":ident,"workflow_id":req.workflow_id,"status":"awaiting_approval","actions":actions,
-         "message":"Workflow run is queued for your approval. No action has executed yet."}
+         "message":"Workflow run is waiting for your approval. Nothing has executed yet."}
 
 @router.get("")
 def list_workflow_runs():
  ensure_runs()
- with db() as c:
-  records=c.execute("SELECT * FROM workflow_runs ORDER BY created DESC LIMIT 100").fetchall()
+ with db() as c: records=c.execute("SELECT * FROM workflow_runs ORDER BY created DESC LIMIT 100").fetchall()
  return [{**dict(r),"actions":json.loads(r["actions_json"]),"result":json.loads(r["result_json"]) if r["result_json"] else None} for r in records]
 
 @router.post("/{run_id}/reject")
@@ -92,24 +85,25 @@ def reject_workflow_run(run_id:str,req:ApprovalRequest):
  return {"id":run_id,"status":"rejected"}
 
 @router.post("/{run_id}/approve")
-async def approve_workflow_run(run_id:str,req:ApprovalRequest):
+def approve_workflow_run(run_id:str,req:ApprovalRequest):
  if req.confirmed is not True: raise HTTPException(400,"Explicit approval is required.")
  ensure_runs()
- with db() as c: row=c.execute("SELECT * FROM workflow_runs WHERE id=?",(run_id,)).fetchone()
- if not row: raise HTTPException(404,"Workflow run not found.")
- if row["status"]!="awaiting_approval": raise HTTPException(409,"This workflow run is no longer awaiting approval.")
- actions=json.loads(row["actions_json"])
  with db() as c:
-  changed=c.execute("UPDATE workflow_runs SET status='running',approved_at=?,updated=? WHERE id=? AND status='awaiting_approval'",(stamp(),stamp(),run_id))
- if changed.rowcount!=1: raise HTTPException(409,"Another request already approved this workflow run.")
+  changed=c.execute("UPDATE workflow_runs SET status='queued',approved_at=?,updated=? WHERE id=? AND status='awaiting_approval'",(stamp(),stamp(),run_id))
+ if changed.rowcount!=1: raise HTTPException(409,"Only a run awaiting approval can be approved.")
+ return {"id":run_id,"status":"queued","message":"Approved and added to the persistent workflow queue."}
+
+async def execute_workflow_run(run):
+ run_id=run["id"]
+ actions=json.loads(run["actions_json"])
  results=[]
  try:
   for action in actions:
    if action["type"]=="agent_task":
     prompt=action["prompt"]
-    if row["input_text"]:
-     prompt=prompt.replace("{{input}}",row["input_text"])
-     if "{{input}}" not in action["prompt"]: prompt += "\n\nRun-specific input:\n"+row["input_text"]
+    if run["input_text"]:
+     prompt=prompt.replace("{{input}}",run["input_text"])
+     if "{{input}}" not in action["prompt"]: prompt += "\n\nRun-specific input:\n"+run["input_text"]
     result=await ask(action["agent"],prompt)
     task_id=str(uuid.uuid4())
     with db() as c:
@@ -121,16 +115,24 @@ async def approve_workflow_run(run_id:str,req:ApprovalRequest):
      c.execute("INSERT INTO content_items VALUES(?,?,?,?,?,?,?,?,?)",(ident,action["title"],action["channel"],"short_video","draft",action["script"],"",now,now))
     results.append({"type":"content_draft","content_id":ident,"title":action["title"],"status":"draft"})
    elif action["type"]=="telegram_message":
-    message=action["message"].replace("{{input}}",row["input_text"])
+    message=action["message"].replace("{{input}}",run["input_text"])
     sent=await send_telegram_message(message)
     if not sent: raise RuntimeError("Telegram is not configured or the message could not be delivered.")
     results.append({"type":"telegram_message","sent":True})
   with db() as c:
    c.execute("UPDATE workflow_runs SET status='completed',result_json=?,updated=?,error=NULL WHERE id=? AND status='running'",(json.dumps(results),stamp(),run_id))
-  return {"id":run_id,"status":"completed","results":results}
  except Exception as exc:
   detail=exc.detail if isinstance(exc,HTTPException) else str(exc)
   with db() as c:
    c.execute("UPDATE workflow_runs SET status='failed',error=?,updated=? WHERE id=? AND status='running'",(str(detail)[:1000],stamp(),run_id))
-  if isinstance(exc,HTTPException): raise
-  raise HTTPException(502,"Workflow execution failed. Review the run record for the safe error summary.")
+
+async def run_pending_workflows():
+ """Claim and process at most one approved job; the DB claim prevents double execution."""
+ ensure_runs()
+ with db() as c: run=c.execute("SELECT * FROM workflow_runs WHERE status='queued' ORDER BY created LIMIT 1").fetchone()
+ if not run: return False
+ with db() as c:
+  claimed=c.execute("UPDATE workflow_runs SET status='running',updated=? WHERE id=? AND status='queued'",(stamp(),run["id"]))
+ if claimed.rowcount!=1: return True
+ await execute_workflow_run(dict(run))
+ return True
