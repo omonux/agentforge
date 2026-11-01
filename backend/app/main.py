@@ -310,7 +310,7 @@ def auth_config():
  secret=os.getenv("SESSION_SECRET","")
  password=os.getenv("ADMIN_PASSWORD","")
  salt=os.getenv("ADMIN_PASSWORD_SALT","")
- if len(secret)<32 or len(password)<14 or len(salt)<16:
+ if len(secret)<32 or len(password)<14 or len(salt)<16 or any(v.startswith("REPLACE_") for v in (secret,password,salt)):
   return None
  return secret.encode(),password,salt.encode()
 
