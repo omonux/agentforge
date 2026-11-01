@@ -714,3 +714,7 @@ app.include_router(billing_router)
 # Image generation API routes (workspace authentication middleware applies globally).
 from .image_ai import router as image_ai_router
 app.include_router(image_ai_router)
+
+# YouTube OAuth, video rendering and approval-gated publishing.
+from .youtube_automation import router as youtube_automation_router
+app.include_router(youtube_automation_router)
