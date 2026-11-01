@@ -307,13 +307,11 @@ def edit_ticket(ident:str,x:TicketStatus):
 async def draft_reply(ident:str):
  ticket=one("SELECT * FROM tickets WHERE id=?",(ident,))
  if not ticket: raise HTTPException(404,"Ticket not found.")
- prompt=("Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.
-"
-         +f"Customer: {ticket['customer']}
-"
-         +f"Subject: {ticket['subject']}
-"
+ prompt=("Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.\n"
+         +f"Customer: {ticket['customer']}\n"
+         +f"Subject: {ticket['subject']}\n"
          +f"Message: {ticket['message']}")
+ result=await ask("support",prompt)
  result=await ask("support",prompt)
  with db() as c: c.execute("UPDATE tickets SET reply_draft=?,updated=? WHERE id=?",(result,stamp(),ident))
  return one("SELECT * FROM tickets WHERE id=?",(ident,))
@@ -476,12 +474,8 @@ async def trading_analysis(x:TradingAnalysisIn):
  prompt=("Provide an educational, risk-first market scenario analysis using ONLY the market information supplied below. "
  "Do not invent live prices, news, indicators or events. Do not tell the user to buy, sell or use leverage. "
  "Separate observed inputs from assumptions. Explain bullish, bearish and neutral scenarios, invalidation conditions, "
- "missing data, and risk-management questions. State clearly that this is not personalized financial advice.
-"
- f"Symbol: {x.symbol.upper()}
-Timeframe: {x.timeframe}
-User-supplied market context:
-{x.market_context}")
+ "missing data, and risk-management questions. State clearly that this is not personalized financial advice.\n"
+ f"Symbol: {x.symbol.upper()}\nTimeframe: {x.timeframe}\nUser-supplied market context:\n{x.market_context}")
  result=await ask("research",prompt)
  return {"symbol":x.symbol.upper(),"timeframe":x.timeframe,"analysis":result,"data_source":"user_supplied_context","disclaimer":"Educational scenario analysis only. Not a trading signal, personalized financial advice or a guarantee."}
 
