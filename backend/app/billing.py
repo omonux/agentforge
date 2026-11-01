@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from .omonux_integrations import secret_or_env
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 DB = Path(os.getenv("DATABASE_PATH", "./agentforge.db"))
@@ -69,7 +70,8 @@ def _price(plan: str):
 
 def _plan_code(plan: str):
     key = "PAYSTACK_PRO_MONTHLY_PLAN_CODE" if plan == "pro_monthly" else "PAYSTACK_BUSINESS_MONTHLY_PLAN_CODE"
-    return os.getenv(key, "").strip() or None
+    secret_name = "paystack_pro_monthly_plan_code" if plan == "pro_monthly" else "paystack_business_monthly_plan_code"
+    return secret_or_env(secret_name, key).strip() or None
 
 
 def _valid_email(value: str):
@@ -176,10 +178,10 @@ async def _get_paystack_verification(reference, secret):
 @router.get("/status")
 def billing_status():
     return {
-        "paystack_configured": bool(os.getenv("PAYSTACK_SECRET_KEY")),
-        "opay_configured": all(os.getenv(k) for k in ("OPAY_PUBLIC_KEY", "OPAY_SECRET_KEY", "OPAY_MERCHANT_ID")),
-        "opay_country": os.getenv("OPAY_COUNTRY", "NG"),
-        "opay_currency": os.getenv("OPAY_CURRENCY", "NGN"),
+        "paystack_configured": bool(secret_or_env("paystack_secret_key","PAYSTACK_SECRET_KEY")),
+        "opay_configured": all(secret_or_env(n,e) for n,e in (("opay_public_key","OPAY_PUBLIC_KEY"),("opay_secret_key","OPAY_SECRET_KEY"),("opay_merchant_id","OPAY_MERCHANT_ID"))),
+        "opay_country": secret_or_env("opay_country","OPAY_COUNTRY","NG"),
+        "opay_currency": secret_or_env("opay_currency","OPAY_CURRENCY","NGN"),
         "prices_configured": all(_price(plan) for plan in PLAN_KEYS),
         "checkout_enabled": os.getenv("BILLING_ENABLED", "false").lower() == "true",
         "live_payments_enabled": os.getenv("BILLING_LIVE_ENABLED", "false").lower() == "true",
@@ -241,7 +243,7 @@ async def create_checkout(data: CheckoutInput):
     _insert_payment(reference, data.provider, email, data.plan, amount, "NGN")
     try:
         if data.provider == "paystack":
-            secret = os.getenv("PAYSTACK_SECRET_KEY", "")
+            secret = secret_or_env("paystack_secret_key","PAYSTACK_SECRET_KEY")
             if not secret:
                 raise HTTPException(503, "Paystack secret key is not configured.")
             if secret.startswith("sk_live_") and os.getenv("BILLING_LIVE_ENABLED", "false").lower() != "true":
@@ -266,15 +268,15 @@ async def create_checkout(data: CheckoutInput):
                 raise HTTPException(502, "Paystack returned an unexpected checkout destination.")
             _update_checkout(reference, checkout_url, str(result["data"].get("reference") or reference))
         else:
-            public_key = os.getenv("OPAY_PUBLIC_KEY", "")
-            merchant_id = os.getenv("OPAY_MERCHANT_ID", "")
+            public_key = secret_or_env("opay_public_key","OPAY_PUBLIC_KEY")
+            merchant_id = secret_or_env("opay_merchant_id","OPAY_MERCHANT_ID")
             if not public_key or not merchant_id:
                 raise HTTPException(503, "OPay merchant public key and merchant ID are not configured.")
             country = os.getenv("OPAY_COUNTRY", "NG").upper()
             currency = os.getenv("OPAY_CURRENCY", "NGN").upper()
             if country != "NG" or currency != "NGN":
                 raise HTTPException(503, "OPay checkout is configured for Nigeria NGN only.")
-            api_base = os.getenv("OPAY_API_BASE_URL", "https://sandboxapi.opaycheckout.com").rstrip("/")
+            api_base = secret_or_env("opay_api_base_url","OPAY_API_BASE_URL","https://sandboxapi.opaycheckout.com").rstrip("/")
             if urlparse(api_base).hostname in ("api.opaycheckout.com", "liveapi.opaycheckout.com") and os.getenv("BILLING_LIVE_ENABLED", "false").lower() != "true":
                 raise HTTPException(503, "Live OPay endpoint is blocked until live billing is explicitly enabled.")
             body = {
@@ -429,7 +431,7 @@ async def paystack_webhook(request: Request):
 @router.post("/webhooks/opay")
 async def opay_webhook(request: Request):
     init_billing_db()
-    secret = os.getenv("OPAY_SECRET_KEY", "")
+    secret = secret_or_env("opay_secret_key","OPAY_SECRET_KEY")
     try:
         event = await request.json()
     except ValueError:
