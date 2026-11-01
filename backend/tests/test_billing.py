@@ -89,3 +89,31 @@ def test_checkout_urls_are_restricted_to_provider_domains():
     assert not billing._safe_checkout_url("https://checkout.paystack.com.evil.test/x", "paystack")
     assert billing._safe_checkout_url("https://sandboxcashier.opaycheckout.com/session", "opay")
     assert not billing._safe_checkout_url("http://cashier.opaycheckout.com/session", "opay")
+
+
+def test_paystack_subscription_events_update_existing_entitlement(tmp_path, monkeypatch):
+    monkeypatch.setattr(billing, "DB", tmp_path / "subscriptions.db")
+    monkeypatch.setenv("PAYSTACK_PRO_MONTHLY_PLAN_CODE", "PLN_test_pro")
+    billing.init_billing_db()
+    billing._paystack_subscription_event("subscription.create", {
+        "subscription": {
+            "subscription_code": "SUB_test_123",
+            "next_payment_date": "2026-12-01T00:00:00.000Z",
+        },
+        "customer": {"email": "buyer@example.com"},
+        "plan": {"plan_code": "PLN_test_pro"},
+    })
+    with billing._db() as conn:
+        row = conn.execute(
+            "SELECT status,provider_subscription_id,current_period_end FROM billing_subscriptions"
+        ).fetchone()
+    assert row["status"] == "active"
+    assert row["provider_subscription_id"] == "SUB_test_123"
+    assert row["current_period_end"] == "2026-12-01T00:00:00.000Z"
+
+    billing._paystack_subscription_event("subscription.disable", {
+        "subscription": {"subscription_code": "SUB_test_123"}
+    })
+    with billing._db() as conn:
+        row = conn.execute("SELECT status FROM billing_subscriptions").fetchone()
+    assert row["status"] == "cancelled"
