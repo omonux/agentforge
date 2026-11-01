@@ -184,8 +184,16 @@ async def preview_bybit(request: BybitPreview):
     limit_price = (raw_limit / tick).to_integral_value(rounding=ROUND_UP if side == "BUY" else ROUND_DOWN) * tick
     notional = quantity * limit_price
     max_order = decimal(os.getenv("LIVE_MAX_ORDER_NOTIONAL_USDT", "25"), "per-order cap")
+    daily_cap = decimal(os.getenv("LIVE_MAX_DAILY_NOTIONAL_USDT", "100"), "daily cap")
+    if max_order <= 0 or daily_cap <= 0 or max_order > daily_cap:
+        raise HTTPException(503, "Bybit live order risk limits are invalid.")
     if notional > max_order:
         raise HTTPException(400, f"Order exceeds configured per-order cap ({max_order} USDT).")
+    day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    with db() as conn:
+        reserved = conn.execute("SELECT COALESCE(SUM(CAST(notional_usdt AS REAL)),0) AS total FROM live_order_previews WHERE created_at>=? AND state IN ('submitting','submitted','unknown')", (day_start,)).fetchone()["total"]
+    if decimal(reserved, "daily reserved notional") + notional > daily_cap:
+        raise HTTPException(400, f"Order would exceed daily live notional cap ({daily_cap} USDT).")
     min_order = decimal(lot.get("minOrderAmt", "0"), "minimum order amount")
     if notional < min_order:
         raise HTTPException(400, f"Order is below Bybit minimum order amount ({min_order} USDT).")
@@ -237,9 +245,47 @@ async def place_bybit(request: BybitPlace):
     if request.confirmation != expected:
         raise HTTPException(400, f'Type exactly "{expected}" to confirm this order.')
     key, secret = bybit_keys()
-    # Claim preview before contacting the exchange; uncertain outcomes are never auto-retried.
+    # Recheck market price and account funds immediately before submitting.
+    ticker = await bybit_request("GET", "/v5/market/tickers", key, secret, {"category": "spot", "symbol": preview["symbol"]}, private=False)
+    latest = next(iter(ticker.get("list", [])), None)
+    if not latest:
+        raise HTTPException(502, "Could not refresh Bybit price; no order was sent.")
+    current_price = decimal(latest["lastPrice"], "current price")
+    reference = decimal(preview["quote_price"], "preview price")
+    if abs(current_price-reference)/reference > Decimal("0.005"):
+        with db() as conn:
+            conn.execute("UPDATE live_order_previews SET state='price_moved' WHERE id=? AND state='pending'", (request.preview_id,))
+        raise HTTPException(409, "Bybit price moved more than 0.5%; create and review a new preview.")
+    wallet = await bybit_request("GET", "/v5/account/wallet-balance", key, secret, {"accountType": "UNIFIED"})
+    balances = wallet.get("list", [])
+    coins = balances[0].get("coin", []) if balances else []
+    instrument = await bybit_request("GET", "/v5/market/instruments-info", key, secret, {"category": "spot", "symbol": preview["symbol"]}, private=False)
+    item = next(iter(instrument.get("list", [])), None)
+    if not item or item.get("status") != "Trading":
+        raise HTTPException(400, "Bybit symbol is no longer eligible for spot trading.")
+    qty = decimal(preview["quantity"], "quantity")
+    limit_price = decimal(preview["limit_price"], "limit price")
+    estimated = qty * limit_price
+    if preview["side"] == "BUY":
+        available = next((decimal(c.get("availableToWithdraw", c.get("walletBalance", "0")), "USDT balance") for c in coins if c.get("coin") == "USDT"), Decimal("0"))
+        if estimated > available:
+            raise HTTPException(400, "Insufficient available USDT at final validation.")
+    else:
+        base = item.get("baseCoin")
+        available = next((decimal(c.get("availableToWithdraw", c.get("walletBalance", "0")), "base balance") for c in coins if c.get("coin") == base), Decimal("0"))
+        if qty > available:
+            raise HTTPException(400, f"Insufficient available {base} at final validation.")
+    per_order = decimal(os.getenv("LIVE_MAX_ORDER_NOTIONAL_USDT", "25"), "per-order cap")
+    daily_cap = decimal(os.getenv("LIVE_MAX_DAILY_NOTIONAL_USDT", "100"), "daily cap")
+    if estimated > per_order:
+        raise HTTPException(400, "Order exceeds per-order cap at final validation.")
+    # Claim preview and reserve the daily cap atomically; uncertain outcomes are never retried.
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        reserved = conn.execute("SELECT COALESCE(SUM(CAST(notional_usdt AS REAL)),0) AS total FROM live_order_previews WHERE created_at>=? AND state IN ('submitting','submitted','unknown')", (day_start,)).fetchone()["total"]
+        if decimal(reserved, "daily reserved notional") + estimated > daily_cap:
+            raise HTTPException(400, "Order would exceed daily notional cap.")
         cur = conn.execute("UPDATE live_order_previews SET state='submitting' WHERE id=? AND state='pending'", (request.preview_id,))
         if cur.rowcount != 1:
             raise HTTPException(409, "This preview has already been submitted or claimed.")
