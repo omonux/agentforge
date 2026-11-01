@@ -636,3 +636,50 @@ def test_connect_api_vault_is_encrypted_and_wires_provider_settings(tmp_path, mo
         assert removed.status_code == 200
         assert client.get("/api/v1/ai/status").json()["configured"] is False
 
+
+
+def test_workflow_runs_wait_for_approval_and_execute_allowlisted_actions(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(main, "DB", tmp_path / "workflow-runs.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        action_plan = json.dumps([{
+            "type": "content_draft", "title": "Approval-gated draft",
+            "channel": "youtube", "script": "A reviewed script."
+        }])
+        created = client.post("/api/v1/automations", json={
+            "name": "Create a reviewed draft", "trigger_name": "Manual",
+            "action_plan": action_plan
+        })
+        assert created.status_code == 200
+        workflow_id = created.json()["id"]
+        queued = client.post("/api/v1/workflow-runs", json={
+            "workflow_id": workflow_id, "input_text": "Use only verified facts."
+        })
+        assert queued.status_code == 200
+        run_id = queued.json()["id"]
+        assert queued.json()["status"] == "awaiting_approval"
+        assert client.get("/api/v1/content").json() == []
+        completed = client.post("/api/v1/workflow-runs/" + run_id + "/approve",
+                                json={"confirmed": True})
+        assert completed.status_code == 200
+        assert completed.json()["status"] == "completed"
+        assert completed.json()["results"][0]["type"] == "content_draft"
+        assert len(client.get("/api/v1/content").json()) == 1
+
+
+def test_workflow_runner_rejects_unsupported_actions(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(main, "DB", tmp_path / "workflow-unsafe.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        created = client.post("/api/v1/automations", json={
+            "name": "Unsafe workflow", "trigger_name": "Manual",
+            "action_plan": json.dumps([{"type": "shell_command", "command": "echo unsafe"}])
+        })
+        assert created.status_code == 200
+        response = client.post("/api/v1/workflow-runs", json={
+            "workflow_id": created.json()["id"]
+        })
+        assert response.status_code == 400
+
