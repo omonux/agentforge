@@ -140,7 +140,7 @@ def get_tickets(): return rows("SELECT * FROM tickets ORDER BY created DESC LIMI
 def add_ticket(x:TicketIn):
  if x.priority not in ("low","normal","high","urgent"): raise HTTPException(400,"Invalid priority.")
  ident=str(uuid.uuid4()); now=stamp()
- with db() as c: c.execute("INSERT INTO tickets VALUES(?,?,?,?,?,?,?,?,?,?,?)",(ident,x.customer,x.email,x.subject,x.message,"open",x.priority,None,now,now))
+ with db() as c: c.execute("INSERT INTO tickets VALUES(?,?,?,?,?,?,?,?,?,?)",(ident,x.customer,x.email,x.subject,x.message,"open",x.priority,None,now,now))
  return one("SELECT * FROM tickets WHERE id=?",(ident,))
 @app.patch("/api/v1/support/tickets/{ident}")
 def edit_ticket(ident:str,x:TicketStatus):
