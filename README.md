@@ -107,7 +107,8 @@ AgentForge now contains a **disabled-by-default payment integration foundation**
 Configure the following privately in the hosting dashboard:
 
 - `BILLING_BASE_URL`: public HTTPS application URL.
-- `BILLING_LIVE_ENABLED=false`: keep disabled until both providers pass sandbox and production readiness checks.
+- `BILLING_ENABLED=false`: keep checkout disabled until sandbox testing is ready. Set true only when using sandbox credentials/endpoints.
+- `BILLING_LIVE_ENABLED=false`: keep live payment endpoints and live Paystack keys blocked until both providers pass sandbox and production readiness checks.
 - `AGENTFORGE_PRO_MONTHLY_NGN` and `AGENTFORGE_BUSINESS_MONTHLY_NGN`: monthly plan prices as whole naira.
 - `PAYSTACK_SECRET_KEY`; optionally `PAYSTACK_PRO_MONTHLY_PLAN_CODE` and `PAYSTACK_BUSINESS_MONTHLY_PLAN_CODE` for recurring subscriptions.
 - `OPAY_PUBLIC_KEY`, `OPAY_SECRET_KEY`, `OPAY_MERCHANT_ID`, and confirm `OPAY_API_BASE_URL` with OPay for your approved NGN merchant account.
