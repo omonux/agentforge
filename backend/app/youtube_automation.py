@@ -211,16 +211,11 @@ async def maybe_send_daily_analytics_report():
  if not (read_secret("telegram_bot_token") and read_secret("telegram_chat_id")): return False
  report=await fetch_channel_analytics(28); totals=report["totals"]
  revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: unavailable for this channel/permission"
- message=("AgentForge daily YouTube report ("+report["start_date"]+" to "+report["end_date"]+")
-"
-          +"Views: "+str(totals["views"])+"
-"
-          +"Subscribers gained: "+str(totals["subscribers_gained"])+"
-"
-          +"Subscribers lost: "+str(totals["subscribers_lost"])+"
-"
-          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"
-"
+ message=("AgentForge daily YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\n"
+          +"Views: "+str(totals["views"])+"\n"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\n"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\n"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\n"
           +revenue)
  sent=await send_telegram_message(message)
  if sent:
@@ -233,16 +228,11 @@ async def send_analytics_to_telegram(days:int=28):
  report=await fetch_channel_analytics(days)
  totals=report["totals"]
  revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: not available (check monetization and Google Analytics permission)"
- message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")
-"
-          +"Views: "+str(totals["views"])+"
-"
-          +"Subscribers gained: "+str(totals["subscribers_gained"])+"
-"
-          +"Subscribers lost: "+str(totals["subscribers_lost"])+"
-"
-          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"
-"
+ message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\n"
+          +"Views: "+str(totals["views"])+"\n"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\n"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\n"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\n"
           +revenue)
  sent=await send_telegram_message(message)
  if not sent: raise HTTPException(409,"Configure and test Telegram in Connect API first.")
@@ -285,13 +275,9 @@ def _captions(script:str):
  cursor=0.0; parts=[]
  for index,sentence in enumerate(sentences):
   span=duration*max(1,len(sentence.split()))/total_words
-  parts.append(f"{index+1}
-{_srt_time(cursor)} --> {_srt_time(cursor+span)}
-{sentence}
-")
+  parts.append(f"{index+1}\n{_srt_time(cursor)} --> {_srt_time(cursor+span)}\n{sentence}\n")
   cursor+=span
- return "
-".join(parts)
+ return "\n".join(parts)
 
 @router.post("/drafts/{draft_id}/voice")
 async def generate_voice(draft_id:str):
@@ -450,9 +436,7 @@ async def approve_publish(draft_id:str,req:Approve):
  if row["status"]!="ready_for_approval" or not row["video_path"] or not Path(row["video_path"]).is_file():
   raise HTTPException(409,"Only a fully rendered video awaiting approval can be uploaded.")
  tok=await access_token()
- metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"
-
-"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
+ metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"\n\n"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
  with conn() as c:
   changed=c.execute("UPDATE yt_drafts SET status='uploading',error=NULL WHERE id=? AND status='ready_for_approval'",(draft_id,))
   if changed.rowcount!=1: raise HTTPException(409,"This draft is already being uploaded or has already been processed.")
