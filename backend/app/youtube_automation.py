@@ -35,9 +35,9 @@ def conn():
  c.execute("""CREATE TABLE IF NOT EXISTS yt_settings(id INTEGER PRIMARY KEY CHECK(id=1),access_token TEXT,refresh_token TEXT,expires_at TEXT,channel_title TEXT,channel_id TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_drafts(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,script TEXT NOT NULL,topic TEXT NOT NULL,video_path TEXT,thumbnail_path TEXT,status TEXT NOT NULL,privacy TEXT NOT NULL,created TEXT NOT NULL,published_url TEXT,published_at TEXT,error TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_oauth_states(state TEXT PRIMARY KEY,created TEXT NOT NULL)""")
-  columns={r["name"] for r in c.execute("PRAGMA table_info(yt_drafts)").fetchall()}
-  for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT")):
-   if name not in columns: c.execute(f"ALTER TABLE yt_drafts ADD COLUMN {name} {definition}")
+ columns={r["name"] for r in c.execute("PRAGMA table_info(yt_drafts)").fetchall()}
+ for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT")):
+  if name not in columns: c.execute(f"ALTER TABLE yt_drafts ADD COLUMN {name} {definition}")
  c.commit(); return c
 
 class Discover(BaseModel):
@@ -105,7 +105,7 @@ async def oauth_callback(code:str="",state:str="",error:str=""):
  items=q.json().get("items",[])
  if not items: raise HTTPException(502,"No YouTube channel was found on this Google account.")
  channel=items[0]
- old=token_row(); refresh=d.get("refresh_token") or read_secret("youtube_refresh_token")
+ refresh=d.get("refresh_token") or read_secret("youtube_refresh_token")
  if not refresh: raise HTTPException(502,"Google did not issue a refresh token. Remove AgentForge access from your Google account and reconnect with consent.")
  store_secret("youtube_access_token",token); store_secret("youtube_refresh_token",refresh)
  expires=(datetime.now(timezone.utc)+timedelta(seconds=int(d.get("expires_in",3600)))).isoformat()
