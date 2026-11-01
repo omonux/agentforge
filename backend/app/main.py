@@ -1,4 +1,5 @@
 import os, sqlite3, uuid
+from .omonux_engine import fetch_candles, build_signal
 from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -229,6 +230,33 @@ def workflow_status(ident:str,status:str):
   cur=c.execute("UPDATE workflows SET status=?,updated=? WHERE id=?",(status,stamp(),ident))
   if not cur.rowcount: raise HTTPException(404,"Workflow not found.")
  return one("SELECT * FROM workflows WHERE id=?",(ident,))
+# --- Omonux market data and signal research (closed candles; no execution) ---
+@app.get("/api/v1/trading/market/{symbol}")
+async def omonux_market(symbol: str, interval: str = "30m", limit: int = 120):
+ try:
+  candles_data=await fetch_candles(symbol,interval,limit)
+  if len(candles_data)<30: raise HTTPException(422,"The exchange returned too few closed candles.")
+  return {"symbol":symbol.upper(),"interval":interval,"candles":candles_data,"count":len(candles_data),"source":"Binance public market data","notice":"The forming candle is excluded. Market data can be delayed or unavailable."}
+ except ValueError as e: raise HTTPException(400,str(e))
+ except httpx.HTTPStatusError as e: raise HTTPException(502,f"Market data provider returned HTTP {e.response.status_code}.")
+ except httpx.RequestError: raise HTTPException(502,"Could not reach Binance market data. Try again shortly.")
+
+@app.get("/api/v1/trading/signals")
+async def omonux_signals(symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT", interval: str = "30m"):
+ results=[]
+ requested=[item.strip() for item in symbols.split(",") if item.strip()][:10]
+ if not requested: raise HTTPException(400,"Provide at least one market symbol.")
+ for symbol in requested:
+  try:
+   candles_data=await fetch_candles(symbol,interval,120)
+   results.append(build_signal(symbol.upper(),candles_data))
+  except ValueError as e: raise HTTPException(400,str(e))
+  except httpx.HTTPStatusError as e:
+   results.append({"symbol":symbol.upper(),"status":"unavailable","error":f"Market provider HTTP {e.response.status_code}"})
+  except httpx.RequestError:
+   results.append({"symbol":symbol.upper(),"status":"unavailable","error":"Market data provider unavailable"})
+ return {"signals":results,"mode":"research_only","source":"Binance public closed candles","disclaimer":"Signals are deterministic technical research, not financial advice. They do not place orders and do not guarantee results."}
+
 # --- Omonux Trading research watchlist; no live prices, broker connection or live execution ---
 @app.get("/api/v1/trading/watchlist")
 def get_watchlist(): return rows("SELECT * FROM watchlist ORDER BY created DESC")
