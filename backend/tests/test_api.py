@@ -699,3 +699,24 @@ def test_workflow_runner_rejects_unsupported_actions(tmp_path, monkeypatch):
         })
         assert response.status_code == 400
 
+
+
+def test_youtube_daily_report_is_opt_in_and_requires_connections(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "youtube-daily.db")
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        status = client.get("/api/v1/youtube/notifications/daily")
+        assert status.status_code == 200
+        assert status.json()["enabled"] is False
+        enable = client.put("/api/v1/youtube/notifications/daily", json={"enabled": True})
+        assert enable.status_code == 409
+
+
+def test_youtube_caption_builder_creates_srt_cues():
+    from app.youtube_automation import _captions
+    result = _captions("First sentence. Second sentence!")
+    assert "00:00:00,000 -->" in result
+    assert "First sentence." in result
+    assert "Second sentence!" in result
+
