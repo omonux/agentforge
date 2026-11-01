@@ -710,3 +710,7 @@ app.include_router(omonux_live_ops_router)
 # Hosted Paystack and OPay checkout; only signed provider webhooks bypass workspace auth.
 from .billing import router as billing_router
 app.include_router(billing_router)
+
+# Image generation API routes (workspace authentication middleware applies globally).
+from .image_ai import router as image_ai_router
+app.include_router(image_ai_router)
