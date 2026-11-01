@@ -397,3 +397,31 @@ def test_live_execution_preview_requires_separate_live_credentials(tmp_path, mon
             "symbol": "BTCUSDT", "side": "BUY", "quantity": "0.0001"
         })
         assert response.status_code == 409
+
+
+def test_live_ops_analytics_and_alerts_are_safe_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "live-ops.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        analytics = client.get("/api/v1/trading/live-ops/analytics")
+        assert analytics.status_code == 200
+        assert analytics.json()["orders_included"] == 0
+        prefs = client.get("/api/v1/trading/live-ops/alerts/preferences")
+        assert prefs.status_code == 200
+        assert prefs.json()["enabled"] is False
+        disabled = client.post("/api/v1/trading/live-ops/bybit/preview", json={
+            "symbol": "BTCUSDT", "side": "BUY", "quantity": "0.001"
+        })
+        assert disabled.status_code == 423
+
+
+def test_live_ops_alerts_require_explicit_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "live-alerts.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.put("/api/v1/trading/live-ops/alerts/preferences", json={
+            "enabled": False, "on_fill": True, "on_partial": True,
+            "on_reject": True, "on_risk_stop": True
+        })
+        assert response.status_code == 200
+        assert response.json()["enabled"] is False
