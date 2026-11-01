@@ -14,3 +14,41 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 @media(max-width:720px){.side{display:flex;position:relative;inset:auto;width:auto;height:auto;padding:12px;flex-direction:row;align-items:center;gap:7px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 8px;flex-shrink:0}.brand small,.switch,.side>label,.sidebottom{display:none}.side .nav{width:auto;white-space:nowrap;padding:9px;flex-shrink:0}.side .nav svg{width:15px}.app main{margin-left:0}.content{padding:20px 14px}.headright{gap:8px}.searchtrigger span{display:none}.searchtrigger kbd{display:none}header{height:58px}.welcome{align-items:flex-start;gap:12px}.welcome .primary{white-space:nowrap}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:420px){.welcome{flex-direction:column}.welcome .primary{font-size:11px}.headright{font-size:0}.avatar{width:26px;height:26px}.side .nav{font-size:10px}.stats{grid-template-columns:1fr 1fr}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+
+/* Operations command centre */
+.pulsegrid{display:grid;grid-template-columns:1.2fr 1fr;gap:14px;margin:16px 0 30px}
+.pulsepanel{min-width:0;padding:19px;background:linear-gradient(145deg,#17253a,#101a29);border:1px solid #2a3850;border-radius:12px;box-shadow:0 14px 38px #0002}
+.pulsehero{grid-row:span 2;position:relative;overflow:hidden;background:radial-gradient(ellipse at 100% 0%,#4c3c9a55,transparent 48%),linear-gradient(145deg,#1a2943,#111a2b)}
+.pulsehero:after{content:"";position:absolute;width:210px;height:210px;border:1px solid #a99eff18;border-radius:50%;right:-90px;top:-110px;box-shadow:0 0 0 24px #a99eff08,0 0 0 50px #a99eff05;pointer-events:none}
+.pulseeyebrow{display:flex;align-items:center;gap:7px;color:#a99eff;font-size:9px;font-weight:700;letter-spacing:1.4px}
+.pulsehero h2{font:600 23px 'Space Grotesk';margin:13px 0 7px}
+.pulsehero>p{max-width:410px;color:#a5b2c7;font-size:11px;line-height:1.7;margin:0}
+.pulsemetrics{display:flex;gap:32px;margin:25px 0}
+.pulsemetrics strong,.pulsemetrics span{display:block}
+.pulsemetrics strong{font:600 23px 'Space Grotesk'}
+.pulsemetrics span{font-size:9px;color:#8f9db3;margin-top:4px}
+.pulsepanelhead{display:flex;justify-content:space-between;align-items:center;color:#a99eff}
+.pulsepanelhead h3{font:600 13px 'Space Grotesk';color:#edf1fa;margin:6px 0 0}
+.readinesslist{margin-top:12px}
+.readinessitem{display:flex;align-items:center;gap:9px;padding:10px 0;border-top:1px solid #29364b}
+.readinessitem>span:nth-child(2){flex:1;min-width:0}
+.readinessitem b,.readinessitem small{display:block}
+.readinessitem b{font-size:10px;color:#e4eaf5}
+.readinessitem small{font-size:9px;color:#8998af;margin-top:3px}
+.readinessicon{display:grid;place-items:center;width:26px;height:26px;border-radius:8px}
+.readinessicon.ok{color:#70dcb7;background:#17382f}
+.readinessicon.pending{color:#e5bb72;background:#3c3020}
+.readinessitem em{font-style:normal;font-size:8px;font-weight:700;letter-spacing:.7px}
+.readinessitem em.ready{color:#70dcb7}.readinessitem em.pending{color:#e5bb72}
+.pulsehint{font-size:9px;line-height:1.6;color:#8291a8;margin:9px 0 0}
+.pulseactions>button{width:100%;display:flex;align-items:center;gap:10px;padding:12px 0;background:none;border:0;border-top:1px solid #29364b;color:#e5eaf4;text-align:left}
+.pulseactions>button:first-of-type{margin-top:10px}
+.pulseactions>button>span:nth-child(2){flex:1}
+.pulseactions>button b,.pulseactions>button small{display:block}
+.pulseactions>button b{font-size:10px}.pulseactions>button small{font-size:9px;color:#8998af;margin-top:3px}
+.pulseactions>button>svg{color:#8392a9;transition:transform .18s}
+.pulseactions>button:hover>svg{transform:translateX(3px);color:#b2a7ff}
+.pulseactionicon{width:30px;height:30px;display:grid;place-items:center;background:#29244f;color:#b2a7ff;border-radius:8px}
+@media(max-width:900px){.pulsegrid{grid-template-columns:1fr 1fr}.pulsehero{grid-column:1/-1;grid-row:auto}}
+@media(max-width:600px){.pulsegrid{grid-template-columns:1fr}.pulsehero{grid-column:auto}.pulsemetrics{gap:22px}.pulsehero h2{font-size:20px}}
