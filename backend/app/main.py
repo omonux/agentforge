@@ -58,14 +58,27 @@ async def life(app):
     # A temporary exchange/network failure must not crash the API process.
     pass
    await asyncio.sleep(max(30, int(os.getenv("LIVE_RECONCILE_INTERVAL_SECONDS", "60"))))
+ async def workflow_queue_scheduler():
+  await asyncio.sleep(1)
+  while True:
+   try:
+    from .workflow_engine import run_pending_workflows
+    processed=await run_pending_workflows()
+   except asyncio.CancelledError:
+    raise
+   except Exception:
+    processed=False
+   await asyncio.sleep(1 if processed else max(2,int(os.getenv("WORKFLOW_POLL_SECONDS","3"))))
  scheduler=asyncio.create_task(auto_trade_scheduler())
  live_scheduler=asyncio.create_task(live_reconciliation_scheduler())
+ workflow_scheduler=asyncio.create_task(workflow_queue_scheduler())
  try:
   yield
  finally:
   scheduler.cancel()
   live_scheduler.cancel()
-  for task in (scheduler,live_scheduler):
+  workflow_scheduler.cancel()
+  for task in (scheduler,live_scheduler,workflow_scheduler):
    try: await task
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
