@@ -513,10 +513,22 @@ async def auto_trade_run_once():
  entries_today=sum(1 for e in day_events if e["event_type"]=="PAPER_ENTRY")
  daily_pnl=sum(float(e["pnl"] or 0) for e in day_events if e["event_type"]=="PAPER_EXIT")
  equity=10000.0
- if daily_pnl <= -(equity*settings["max_daily_loss_percent"]/100):
+ # Include current mark-to-market losses on every open paper position. If a quote
+ # cannot be obtained, fail closed: do not open new positions using incomplete risk data.
+ unrealized_pnl=0.0
+ for held in rows("SELECT * FROM auto_trade_positions"):
+  try:
+   mark_candles=await fetch_candles(held["symbol"],"30m",60)
+   mark_price=float(mark_candles[-1]["close"])
+   unrealized_pnl+=(mark_price-float(held["entry_price"]))*float(held["quantity"])
+  except (ValueError,httpx.HTTPError,IndexError,KeyError) as exc:
+   auto_event("RISK_CHECK_ERROR",held.get("symbol"),str(exc))
+   raise HTTPException(503,"Risk check could not price every open paper position. No new trades will be opened until market data is available.")
+ daily_total_pnl=daily_pnl+unrealized_pnl
+ if daily_total_pnl <= -(equity*settings["max_daily_loss_percent"]/100):
   with db() as c: c.execute("UPDATE auto_trade_settings SET running=0,updated=? WHERE id=1",(stamp(),))
-  auto_event("RISK_BLOCK",details="Maximum daily loss limit reached; engine stopped")
-  raise HTTPException(409,"Daily loss limit reached. The engine has been stopped; review the audit log before restarting.")
+  auto_event("RISK_BLOCK",details=f"Daily loss limit reached including unrealized P&L ({daily_total_pnl:.2f})")
+  raise HTTPException(409,"Daily loss limit reached including open-position losses. The engine has been stopped; review the audit log before restarting.")
  actions=[]
  # Manage existing positions first using latest closed candle prices.
  open_positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened")
@@ -564,7 +576,7 @@ async def auto_trade_run_once():
   except (ValueError,httpx.HTTPError,IndexError) as e:
    auto_event("CYCLE_ERROR",symbol,str(e))
  with db() as c: c.execute("UPDATE auto_trade_settings SET updated=? WHERE id=1",(stamp(),))
- return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
+ return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"unrealized_pnl_at_cycle_start":round(unrealized_pnl,2),"daily_total_pnl_at_cycle_start":round(daily_total_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
 
 # OMONUX legacy chart-image analysis, protected by the workspace auth middleware above.
 from .omonux_chart_analysis import router as omonux_chart_router
