@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .main import db, stamp
 
 router = APIRouter(prefix="/api/v1/trading/integrations", tags=["OMONUX Integrations"])
-ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "binance_live_api_key", "binance_live_api_secret", "bybit_live_api_key", "bybit_live_api_secret", "telegram_bot_token", "telegram_chat_id"}
+ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "binance_live_api_key", "binance_live_api_secret", "bybit_live_api_key", "bybit_live_api_secret", "telegram_bot_token", "telegram_chat_id", "ai_api_key", "ai_base_url", "ai_model", "image_api_key", "image_base_url", "image_model", "replicate_api_token", "replicate_model", "youtube_client_id", "youtube_client_secret", "youtube_redirect_uri", "youtube_region", "elevenlabs_api_key", "elevenlabs_voice_id", "elevenlabs_model", "paystack_secret_key", "paystack_public_key", "paystack_pro_monthly_plan_code", "paystack_business_monthly_plan_code", "opay_public_key", "opay_secret_key", "opay_merchant_id", "opay_api_base_url", "opay_country", "opay_currency"}
 
 
 def cipher():
@@ -50,7 +50,7 @@ def read_secret(name: str):
         raise HTTPException(503, "A stored integration secret cannot be decrypted. Check SECRET_ENCRYPTION_KEY; do not overwrite it until the original key is restored.")
 
 
-class SecretInput(BaseModel):
+def secret_or_env(name: str, env_name: str, default: str = "") -> str:\n    stored = read_secret(name)\n    return stored if stored is not None else os.getenv(env_name, default)\n\n\nclass SecretInput(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     value: str = Field(min_length=1, max_length=4096)
 
