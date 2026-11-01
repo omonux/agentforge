@@ -50,7 +50,12 @@ def read_secret(name: str):
         raise HTTPException(503, "A stored integration secret cannot be decrypted. Check SECRET_ENCRYPTION_KEY; do not overwrite it until the original key is restored.")
 
 
-def secret_or_env(name: str, env_name: str, default: str = "") -> str:\n    stored = read_secret(name)\n    return stored if stored is not None else os.getenv(env_name, default)\n\n\nclass SecretInput(BaseModel):
+def secret_or_env(name: str, env_name: str, default: str = "") -> str:
+    stored = read_secret(name)
+    return stored if stored is not None else os.getenv(env_name, default)
+
+
+class SecretInput(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     value: str = Field(min_length=1, max_length=4096)
 
