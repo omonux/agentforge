@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Activity, ArrowRight, Bot, CheckCircle2, CircleAlert, Command, Sparkles, Workflow } from "lucide-react";
+import { apiFetch, API } from "./api";
 
 type Props = {
   apiOnline: boolean;
@@ -8,6 +10,8 @@ type Props = {
   onCreateTask: () => void;
   onNavigate: (page: string) => void;
 };
+
+type Department = { id: string; name: string; page: string; state: string; detail: string };
 
 export default function OperationsPulse({
   apiOnline,
