@@ -30,6 +30,20 @@ RECV = "5000"
 
 def ensure_ops_tables():
     with db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS live_order_previews(
+            id TEXT PRIMARY KEY, exchange_name TEXT NOT NULL, symbol TEXT NOT NULL, side TEXT NOT NULL,
+            quantity TEXT NOT NULL, quote_price TEXT NOT NULL, limit_price TEXT NOT NULL DEFAULT '0',
+            notional_usdt TEXT NOT NULL, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL,
+            state TEXT NOT NULL DEFAULT 'pending', response TEXT)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS live_orders(
+            id TEXT PRIMARY KEY, preview_id TEXT NOT NULL UNIQUE, exchange_order_id TEXT,
+            client_order_id TEXT NOT NULL UNIQUE, symbol TEXT NOT NULL, side TEXT NOT NULL,
+            quantity TEXT NOT NULL, executed_quantity TEXT, quote_quantity TEXT,
+            status TEXT NOT NULL, response TEXT NOT NULL, created_at TEXT NOT NULL)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS live_trading_state(
+            id INTEGER PRIMARY KEY CHECK(id=1), emergency_stopped INTEGER NOT NULL DEFAULT 1,
+            reason TEXT, updated TEXT NOT NULL)""")
+        conn.execute("INSERT OR IGNORE INTO live_trading_state(id,emergency_stopped,updated) VALUES(1,1,?)", (stamp(),))
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(live_orders)")}
         if "exchange_name" not in columns:
             conn.execute("ALTER TABLE live_orders ADD COLUMN exchange_name TEXT NOT NULL DEFAULT 'binance'")
