@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .main import db, stamp
 
 router = APIRouter(prefix="/api/v1/trading/integrations", tags=["OMONUX Integrations"])
-ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "binance_live_api_key", "binance_live_api_secret", "bybit_live_api_key", "bybit_live_api_secret", "telegram_bot_token", "telegram_chat_id"}
+ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "binance_live_api_key", "binance_live_api_secret", "bybit_live_api_key", "bybit_live_api_secret", "telegram_bot_token", "telegram_chat_id", "ai_api_key", "ai_base_url", "ai_model", "image_api_key", "image_base_url", "image_model", "replicate_api_token", "replicate_model", "replicate_input_json", "youtube_client_id", "youtube_client_secret", "youtube_redirect_uri", "youtube_region", "elevenlabs_api_key", "elevenlabs_voice_id", "elevenlabs_model", "paystack_secret_key", "paystack_public_key", "paystack_pro_monthly_plan_code", "paystack_business_monthly_plan_code", "opay_public_key", "opay_secret_key", "opay_merchant_id", "opay_api_base_url", "opay_country", "opay_currency"}
 
 
 def cipher():
@@ -48,6 +48,11 @@ def read_secret(name: str):
         return cipher().decrypt(bytes(row["ciphertext"])).decode("utf-8")
     except (InvalidToken, UnicodeDecodeError):
         raise HTTPException(503, "A stored integration secret cannot be decrypted. Check SECRET_ENCRYPTION_KEY; do not overwrite it until the original key is restored.")
+
+
+def secret_or_env(name: str, env_name: str, default: str = "") -> str:
+    stored = read_secret(name)
+    return stored if stored is not None else os.getenv(env_name, default)
 
 
 class SecretInput(BaseModel):
@@ -113,3 +118,21 @@ async def test_telegram():
         raise HTTPException(502, "Telegram returned an error. Check the bot token, chat ID and bot permissions.")
     except httpx.RequestError:
         raise HTTPException(502, "Could not reach Telegram. Check the server network and try again.")
+
+
+async def send_telegram_message(message: str):
+    """Send an opt-in workspace event; return False when Telegram is not configured."""
+    token = read_secret("telegram_bot_token")
+    chat_id = read_secret("telegram_chat_id")
+    if not token or not chat_id:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": message[:3500], "disable_web_page_preview": True},
+            )
+        response.raise_for_status()
+        return bool(response.json().get("ok"))
+    except (httpx.HTTPError, ValueError):
+        return False

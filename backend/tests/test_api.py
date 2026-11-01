@@ -593,3 +593,131 @@ def test_logout_revokes_server_side_session(tmp_path, monkeypatch):
         # Simulate a copied cookie being replayed after logout.
         client.cookies.set("agentforge_session", session_token)
         assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_connect_api_vault_is_encrypted_and_wires_provider_settings(tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(main, "DB", tmp_path / "connect-api.db")
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret-that-is-long-enough-123456")
+    monkeypatch.setenv("ADMIN_PASSWORD", "strong-test-password-12345")
+    monkeypatch.setenv("ADMIN_PASSWORD_SALT", "test-salt-0123456789abcdef")
+    monkeypatch.setenv("COOKIE_SECURE", "false")
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("AI_BASE_URL", raising=False)
+    monkeypatch.delenv("AI_MODEL", raising=False)
+    with TestClient(main.app) as client:
+        assert client.get("/api/v1/connect-api").status_code == 401
+        login(client, monkeypatch)
+        listing = client.get("/api/v1/connect-api")
+        assert listing.status_code == 200
+        data = listing.json()
+        assert data["encryption_ready"] is True
+        service_ids = {item["id"] for item in data["services"]}
+        assert {"ai", "images", "video", "youtube", "telegram", "voice", "payments", "trading"} <= service_ids
+        saved_values = {
+            "ai_api_key": "private-ai-test-key",
+            "ai_base_url": "https://api.openai.com/v1",
+            "ai_model": "gpt-test-model",
+            "telegram_bot_token": "123456:private-telegram-token",
+            "telegram_chat_id": "987654321",
+            "replicate_input_json": '{"aspect_ratio":"9:16","duration":30}',
+        }
+        for name, value in saved_values.items():
+            response = client.put("/api/v1/connect-api/secrets", json={"name": name, "value": value})
+            assert response.status_code == 200
+            assert response.json()["value_returned"] is False
+        status = client.get("/api/v1/connect-api")
+        assert status.status_code == 200
+        assert status.json()["services"][0]["configured"] is True
+        assert "private-ai-test-key" not in status.text
+        assert client.get("/api/v1/ai/status").json()["configured"] is True
+        with sqlite3.connect(main.DB) as conn:
+            rows = conn.execute("SELECT name,ciphertext FROM integration_secrets").fetchall()
+        ciphertexts = {name: bytes(value) for name, value in rows}
+        assert b"private-ai-test-key" not in ciphertexts["ai_api_key"]
+        assert b"123456:private-telegram-token" not in ciphertexts["telegram_bot_token"]
+        removed = client.delete("/api/v1/connect-api/secrets/ai_api_key")
+        assert removed.status_code == 200
+        assert client.get("/api/v1/ai/status").json()["configured"] is False
+
+
+
+def test_workflow_runs_wait_for_approval_and_execute_allowlisted_actions(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(main, "DB", tmp_path / "workflow-runs.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        action_plan = json.dumps([{
+            "type": "content_draft", "title": "Approval-gated draft",
+            "channel": "youtube", "script": "A reviewed script."
+        }])
+        created = client.post("/api/v1/automations", json={
+            "name": "Create a reviewed draft", "trigger_name": "Manual",
+            "action_plan": action_plan
+        })
+        assert created.status_code == 200
+        workflow_id = created.json()["id"]
+        queued = client.post("/api/v1/workflow-runs", json={
+            "workflow_id": workflow_id, "input_text": "Use only verified facts."
+        })
+        assert queued.status_code == 200
+        run_id = queued.json()["id"]
+        assert queued.json()["status"] == "awaiting_approval"
+        assert client.get("/api/v1/content").json() == []
+        approved = client.post("/api/v1/workflow-runs/" + run_id + "/approve",
+                               json={"confirmed": True})
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "queued"
+        import asyncio
+        from app.workflow_engine import run_pending_workflows
+        asyncio.run(run_pending_workflows())
+        import time
+        completed = None
+        for _ in range(40):
+            history = client.get("/api/v1/workflow-runs").json()
+            completed = next(item for item in history if item["id"] == run_id)
+            if completed["status"] in ("completed", "failed"):
+                break
+            time.sleep(0.05)
+        assert completed["status"] == "completed"
+        assert completed["result"][0]["type"] == "content_draft"
+        assert len(client.get("/api/v1/content").json()) == 1
+
+
+def test_workflow_runner_rejects_unsupported_actions(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(main, "DB", tmp_path / "workflow-unsafe.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        created = client.post("/api/v1/automations", json={
+            "name": "Unsafe workflow", "trigger_name": "Manual",
+            "action_plan": json.dumps([{"type": "shell_command", "command": "echo unsafe"}])
+        })
+        assert created.status_code == 200
+        response = client.post("/api/v1/workflow-runs", json={
+            "workflow_id": created.json()["id"]
+        })
+        assert response.status_code == 400
+
+
+
+def test_youtube_daily_report_is_opt_in_and_requires_connections(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "youtube-daily.db")
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        status = client.get("/api/v1/youtube/notifications/daily")
+        assert status.status_code == 200
+        assert status.json()["enabled"] is False
+        enable = client.put("/api/v1/youtube/notifications/daily", json={"enabled": True})
+        assert enable.status_code == 409
+
+
+def test_youtube_caption_builder_creates_srt_cues():
+    from app.youtube_automation import _captions
+    result = _captions("First sentence. Second sentence!")
+    assert "00:00:00,000 -->" in result
+    assert "First sentence." in result
+    assert "Second sentence!" in result
+

@@ -121,3 +121,6 @@ Never collect card details in AgentForge forms, never paste merchant keys into c
 ## Private company presentation
 
 For an owner-led presentation, use a separate private demo deployment with its own persistent disk, database path, credentials and synthetic sample data. Do not give the presenting company a login or connect real customer integrations. Follow the [Private Company Demo Guide](docs/PRIVATE_COMPANY_DEMO.md) before preparing a demonstration. This does not enable multi-company accounts or tenant isolation; those require a separate implementation and security review.
+## Provider setup
+
+See [Connect API setup](docs/CONNECT_API.md) for the central credential vault, required provider values, OAuth configuration and security notes.

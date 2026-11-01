@@ -16,6 +16,10 @@ services:
     envVars:
       - key: DATABASE_PATH
         value: /data/agentforge.db
+      - key: IMAGE_STORAGE_DIR
+        value: /data/generated_images
+      - key: YOUTUBE_STORAGE_DIR
+        value: /data/youtube
       - key: COOKIE_SECURE
         value: "true"
       - key: AI_BASE_URL
@@ -29,6 +33,8 @@ services:
       - key: ADMIN_PASSWORD_SALT
         generateValue: true
       - key: AI_API_KEY
+        sync: false
+      - key: SECRET_ENCRYPTION_KEY
         sync: false
       - key: BILLING_BASE_URL
         sync: false

@@ -11,6 +11,10 @@
 - [x] OMONUX manual live execution is feature-flagged and requires preview plus explicit confirmation.
 - [x] Reconciliation worker only queries recorded orders; it does not submit orders.
 - [x] FIFO analytics regression test is included.
+- [x] Central Connect API vault stores provider credentials encrypted at rest; secret values are never returned to the browser.
+- [x] Persistent workflow queue requires explicit approval and only runs allowlisted agent-task, content-draft and Telegram-message actions.
+- [x] YouTube script, voice narration, estimated SRT captions, async render polling, channel analytics and Telegram event/report endpoints are implemented; external provider credentials and model compatibility still require live verification.
+- [x] YouTube upload uses an atomic approval state transition and blocks automatic retries when the upload outcome is uncertain.
 
 ## Must complete before any public-facing launch
 
@@ -26,13 +30,23 @@
 - [ ] Review Render logs, resource use, rate limits, error handling and service restart behavior.
 - [ ] Keep the service private / access-controlled until an independent production security review is complete.
 
-## Remaining integration work — do not promise as complete\n\n- [ ] Finish end-to-end YouTube video rendering with model-specific input mapping, asynchronous polling, voice/audio and captions; validate actual MP4 output.\n- [ ] Add idempotent upload state transitions and safe recovery for interrupted YouTube uploads.\n- [ ] Add YouTube channel analytics for views/subscribers/revenue where YouTube API permissions allow; revenue requires eligible YouTube Analytics access.\n- [ ] Add opt-in Telegram notifications for publishing status and available channel metrics.\n- [ ] Add a real workflow runner with connector permissions, durable job queue, retries, audit log and approval gates.\n- [ ] Move all departments to a shared production database and validate migrations/backups before public launch.\n\n## Not implemented — do not promise at launch
+## Remaining integration work — do not promise as complete
 
-- Automated trend discovery to select trending topics.
-- End-to-end 30-second vertical video production with generated voice/audio and captions.
-- Fully validated YouTube OAuth, reliable asynchronous rendering, scheduled publishing and duplicate-safe upload recovery.
-- YouTube views, subscriber growth and revenue analytics or Telegram reporting for those metrics.
-- General-purpose workflow execution across external apps.
+- [ ] Finish end-to-end YouTube video rendering with model-specific input mapping, asynchronous polling, voice/audio and captions; validate actual MP4 output.
+- [ ] Add a manual recovery/reconciliation workflow for YouTube uploads marked upload_unknown; automatic retries are blocked to prevent duplicate videos.
+- [ ] Validate YouTube Analytics against a real connected channel; revenue requires eligible monetization and the monetary analytics OAuth scope.
+- [x] Add opt-in scheduled daily Telegram analytics delivery, in addition to event notifications and manual reports.
+- [ ] Validate scheduled analytics delivery against a real connected YouTube channel and Telegram bot.
+- [ ] Expand the workflow runner with additional vetted connectors, retry policies and per-connector permission scopes; current queue supports only agent tasks, content drafts and Telegram messages.
+- [x] AI, image, YouTube, integrations and workflow runs use the same configured database path; generated media uses the persistent service disk.\n- [ ] Migrate the shared SQLite database to the requested Neon PostgreSQL instance, add schema migrations and validate backups/restore before public launch.
+
+## Not implemented — do not promise at launch
+
+- Automated trend scoring/selection beyond YouTube popular-video discovery signals.
+- Fully validated vertical video generation with model-specific dimensions/duration; voice and estimated SRT caption generation are available, but provider model compatibility and final media quality need end-to-end testing.
+- Fully validated YouTube OAuth, provider-specific render success across chosen models, scheduled publishing and upload_unknown recovery.
+- Scheduled YouTube views, subscriber growth and revenue analytics delivery to Telegram; manual reporting is available.
+- General-purpose workflow execution across external apps; only the explicit allowlisted workflow actions are enabled.
 - Multi-user / multi-tenant accounts, billing, roles and tenant isolation.
 - Full historical exchange reconciliation, non-USDT fee conversion and tax-grade accounting.
 - Independent audit of live order execution and operational recovery.

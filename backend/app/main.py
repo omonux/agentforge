@@ -58,14 +58,42 @@ async def life(app):
     # A temporary exchange/network failure must not crash the API process.
     pass
    await asyncio.sleep(max(30, int(os.getenv("LIVE_RECONCILE_INTERVAL_SECONDS", "60"))))
+ from .workflow_engine import recover_interrupted_runs
+ recover_interrupted_runs()
+ async def workflow_queue_scheduler():
+  await asyncio.sleep(1)
+  while True:
+   try:
+    from .workflow_engine import run_pending_workflows
+    processed=await run_pending_workflows()
+   except asyncio.CancelledError:
+    raise
+   except Exception:
+    processed=False
+   await asyncio.sleep(1 if processed else max(2,int(os.getenv("WORKFLOW_POLL_SECONDS","3"))))
  scheduler=asyncio.create_task(auto_trade_scheduler())
  live_scheduler=asyncio.create_task(live_reconciliation_scheduler())
+ async def youtube_telegram_scheduler():
+  await asyncio.sleep(30)
+  while True:
+   try:
+    from .youtube_automation import maybe_send_daily_analytics_report
+    await maybe_send_daily_analytics_report()
+   except asyncio.CancelledError:
+    raise
+   except Exception:
+    pass
+   await asyncio.sleep(max(300,int(os.getenv("YOUTUBE_TELEGRAM_POLL_SECONDS","3600"))))
+ workflow_scheduler=asyncio.create_task(workflow_queue_scheduler())
+ youtube_telegram_task=asyncio.create_task(youtube_telegram_scheduler())
  try:
   yield
  finally:
   scheduler.cancel()
   live_scheduler.cancel()
-  for task in (scheduler,live_scheduler):
+  workflow_scheduler.cancel()
+  youtube_telegram_task.cancel()
+  for task in (scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task):
    try: await task
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
@@ -79,18 +107,27 @@ class PaperTrade(BaseModel):
  side:str
  quantity:float=Field(gt=0,le=1000000)
  reference_price:float=Field(gt=0)
+def current_ai_config():
+ base=secret_or_env("ai_base_url","AI_BASE_URL").rstrip("/")
+ key=secret_or_env("ai_api_key","AI_API_KEY")
+ model=secret_or_env("ai_model","AI_MODEL")
+ return base,key,model
+
 async def ask(agent,prompt):
  if agent not in AGENTS: raise HTTPException(400,"Unknown agent type.")
- if not (BASE and KEY and MODEL): raise HTTPException(503,"AI provider is not configured. Set AI_BASE_URL, AI_API_KEY and AI_MODEL in backend/.env.")
+ base,key,model=current_ai_config()
+ if not (base and key and model): raise HTTPException(503,"AI provider is not configured. Open Connect API and add the AI API key, base URL and model.")
  name,policy=AGENTS[agent]
  try:
   async with httpx.AsyncClient(timeout=90) as client:
-   r=await client.post(BASE+"/chat/completions",headers={"Authorization":"Bearer "+KEY},json={"model":MODEL,"temperature":0.3,"messages":[{"role":"system","content":f"You are {name} in AgentForge. {policy} Be useful, honest and concise."},{"role":"user","content":prompt}]})
+   r=await client.post(base+"/chat/completions",headers={"Authorization":"Bearer "+key},json={"model":model,"temperature":0.3,"messages":[{"role":"system","content":f"You are {name} in AgentForge. {policy} Be useful, honest and concise."},{"role":"user","content":prompt}]})
    r.raise_for_status(); return r.json()["choices"][0]["message"]["content"]
  except httpx.HTTPStatusError as e: raise HTTPException(502,f"AI provider HTTP {e.response.status_code}.")
  except Exception: raise HTTPException(502,"AI provider request failed or returned an invalid response.")
 @app.get("/health")
-def health(): return {"status":"ok","ai_configured":bool(BASE and KEY and MODEL)}
+def health():
+ base,key,model=current_ai_config()
+ return {"status":"ok","ai_configured":bool(base and key and model)}
 
 # --- AI provider diagnostics (never return credentials) ---
 @app.get("/api/v1/workspace/overview")
@@ -105,12 +142,14 @@ def workspace_overview():
  youtube_connected = False
  if "yt_settings" in table_names:
   with db() as c:
-   row=c.execute("SELECT refresh_token FROM yt_settings WHERE id=1").fetchone()
-   youtube_connected=bool(row and row["refresh_token"])
- image_ready=bool(os.getenv("IMAGE_API_KEY"))
- youtube_oauth_ready=bool(os.getenv("YOUTUBE_CLIENT_ID") and os.getenv("YOUTUBE_CLIENT_SECRET"))
+   row=c.execute("SELECT id FROM yt_settings WHERE id=1").fetchone()
+   youtube_connected=bool(row and read_integration_secret("youtube_refresh_token"))
+ image_ready=bool(secret_or_env("image_api_key","IMAGE_API_KEY") and secret_or_env("image_base_url","IMAGE_BASE_URL","https://api.openai.com/v1") and secret_or_env("image_model","IMAGE_MODEL","gpt-image-1"))
+ youtube_oauth_ready=bool(secret_or_env("youtube_client_id","YOUTUBE_CLIENT_ID") and secret_or_env("youtube_client_secret","YOUTUBE_CLIENT_SECRET"))
+ video_ready=bool(secret_or_env("replicate_api_token","VIDEO_API_KEY") and secret_or_env("replicate_model","VIDEO_MODEL"))
  billing_enabled=os.getenv("BILLING_ENABLED","false").lower()=="true"
- ai_ready=bool(BASE and KEY and MODEL)
+ ai_base,ai_key,ai_model=current_ai_config()
+ ai_ready=bool(ai_base and ai_key and ai_model)
  return {
   "counts": {
    "tasks":count("tasks"),"completed_tasks":count("tasks","status='completed'"),
@@ -118,16 +157,19 @@ def workspace_overview():
    "leads":count("leads"),"support_tickets":count("tickets"),
    "content_items":count("content_items"),"workflow_plans":count("workflows"),
    "image_assets":count("image_assets"),"youtube_drafts":count("yt_drafts"),
-   "paper_trades":count("paper_trades"),"watchlist_symbols":count("watchlist")
+   "paper_trades":count("paper_trades"),"watchlist_symbols":count("watchlist"),
+   "workflow_runs":count("workflow_runs"),"pending_workflow_approvals":count("workflow_runs","status='awaiting_approval'"),
+   "completed_workflow_runs":count("workflow_runs","status='completed'"),
+   "published_youtube_videos":count("yt_drafts","status='published'"),"videos_awaiting_approval":count("yt_drafts","status='ready_for_approval'")
   },
   "departments": [
    {"id":"agents","name":"AI Agents","page":"AI Agents","state":"ready" if ai_ready else "needs_setup","detail":"AI provider configured" if ai_ready else "Configure and test the AI provider"},
    {"id":"crm","name":"Sales Pipeline","page":"Sales Pipeline","state":"ready","detail":f"{count('leads')} saved leads"},
    {"id":"support","name":"Customer Support","page":"Customer Support","state":"ready","detail":f"{count('tickets')} saved tickets"},
    {"id":"content","name":"Content Studio","page":"Content Studio","state":"ready","detail":f"{count('content_items')} content records; draft and review"},
-   {"id":"workflows","name":"Automations","page":"Automations","state":"limited","detail":"Workflow plans are saved; general execution connectors are not enabled"},
+   {"id":"workflows","name":"Automations","page":"Automations","state":"limited","detail":"Approval-gated runs support agent tasks, content drafts and Telegram messages"},
    {"id":"images","name":"Image AI Studio","page":"Image AI Studio","state":"ready" if image_ready else "needs_setup","detail":"Image provider key configured" if image_ready else "Configure IMAGE_API_KEY"},
-   {"id":"youtube","name":"YouTube Automation","page":"YouTube Automation","state":"ready" if youtube_connected else "needs_setup","detail":"Channel connected" if youtube_connected else ("Google OAuth configured; connect a channel" if youtube_oauth_ready else "Configure Google OAuth and connect a channel")},
+   {"id":"youtube","name":"YouTube Automation","page":"YouTube Automation","state":"ready" if youtube_connected and video_ready else ("limited" if youtube_connected else "needs_setup"),"detail":"Channel and video provider connected" if youtube_connected and video_ready else ("Channel connected; configure video generation" if youtube_connected else ("Google OAuth configured; connect a channel" if youtube_oauth_ready else "Configure Google OAuth and connect a channel"))},
    {"id":"trading","name":"Omonux Trading","page":"Omonux Trading","state":"limited","detail":"Market research and paper trading; live execution remains separately guarded"},
    {"id":"billing","name":"Billing","page":"Billing","state":"ready" if billing_enabled else "disabled","detail":"Billing enabled by environment" if billing_enabled else "Billing is disabled by default"}
   ],
@@ -136,17 +178,19 @@ def workspace_overview():
 
 @app.get("/api/v1/ai/status")
 def ai_status():
- configured=bool(BASE and KEY and MODEL)
- provider="OpenAI" if BASE.startswith("https://api.openai.com") else ("OpenAI-compatible" if BASE else "Not configured")
- return {"configured":configured,"provider":provider,"model":MODEL if configured else None,"base_url":BASE if configured else None,"key_present":bool(KEY)}
+ base,key,model=current_ai_config()
+ configured=bool(base and key and model)
+ provider="OpenAI" if base.startswith("https://api.openai.com") else ("OpenAI-compatible" if base else "Not configured")
+ return {"configured":configured,"provider":provider,"model":model if configured else None,"base_url":base if configured else None,"key_present":bool(key)}
 
 @app.post("/api/v1/ai/test")
 async def ai_test():
- if not (BASE and KEY and MODEL):
-  raise HTTPException(503,"OpenAI is not configured. Add AI_API_KEY in your hosting environment and set AI_BASE_URL and AI_MODEL.")
+ base,key,model=current_ai_config()
+ if not (base and key and model):
+  raise HTTPException(503,"AI is not configured. Open Connect API and add the AI API key, base URL and model.")
  try:
   answer=await ask("research","Reply with exactly: AgentForge AI connection successful.")
-  return {"connected":True,"provider":"OpenAI" if BASE.startswith("https://api.openai.com") else "OpenAI-compatible","model":MODEL,"message":answer}
+  return {"connected":True,"provider":"OpenAI" if base.startswith("https://api.openai.com") else "OpenAI-compatible","model":model,"message":answer}
  except HTTPException as e:
   if e.status_code==502: raise HTTPException(502,"The AI provider could not complete the test. Check the API key, model name and API billing/limits in your provider dashboard.")
   raise
@@ -263,7 +307,12 @@ def edit_ticket(ident:str,x:TicketStatus):
 async def draft_reply(ident:str):
  ticket=one("SELECT * FROM tickets WHERE id=?",(ident,))
  if not ticket: raise HTTPException(404,"Ticket not found.")
- result=await ask("support",f"Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.\nCustomer: {ticket['customer']}\nSubject: {ticket['subject']}\nMessage: {ticket['message']}")
+ prompt=("Draft a helpful reply to this customer. Do not invent policy, account, order, refund or delivery facts. If information is missing, ask for it or recommend human escalation. Do not send the reply.\n"
+         +f"Customer: {ticket['customer']}\n"
+         +f"Subject: {ticket['subject']}\n"
+         +f"Message: {ticket['message']}")
+ result=await ask("support",prompt)
+ result=await ask("support",prompt)
  with db() as c: c.execute("UPDATE tickets SET reply_draft=?,updated=? WHERE id=?",(result,stamp(),ident))
  return one("SELECT * FROM tickets WHERE id=?",(ident,))
 # --- Content production board: draft -> review -> approved; publishing is intentionally not automated ---
@@ -760,3 +809,10 @@ app.include_router(image_ai_router)
 # YouTube OAuth, trend research, original video generation and approval-gated publishing.
 from .youtube_automation import router as youtube_automation_router
 app.include_router(youtube_automation_router)
+
+# Central encrypted credential vault and connection diagnostics.
+from .omonux_integrations import read_secret as read_integration_secret, secret_or_env
+from .connect_api import router as connect_api_router
+app.include_router(connect_api_router)
+from .workflow_engine import router as workflow_runs_router
+app.include_router(workflow_runs_router)
