@@ -667,8 +667,14 @@ def test_workflow_runs_wait_for_approval_and_execute_allowlisted_actions(tmp_pat
         import asyncio
         from app.workflow_engine import run_pending_workflows
         asyncio.run(run_pending_workflows())
-        history = client.get("/api/v1/workflow-runs").json()
-        completed = next(item for item in history if item["id"] == run_id)
+        import time
+        completed = None
+        for _ in range(40):
+            history = client.get("/api/v1/workflow-runs").json()
+            completed = next(item for item in history if item["id"] == run_id)
+            if completed["status"] in ("completed", "failed"):
+                break
+            time.sleep(0.05)
         assert completed["status"] == "completed"
         assert completed["result"][0]["type"] == "content_draft"
         assert len(client.get("/api/v1/content").json()) == 1
