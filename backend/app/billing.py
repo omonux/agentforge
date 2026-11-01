@@ -122,16 +122,31 @@ def _mark_payment(reference, provider, status, provider_id=None):
             (status, provider_id, now, status, now, reference))
         if status == "success":
             sub_id = secrets.token_urlsafe(18)
-            period_end = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+            existing = conn.execute(
+                "SELECT current_period_end,provider_subscription_id FROM billing_subscriptions WHERE provider=? AND customer_email=? AND plan=?",
+                (provider, row["customer_email"], row["plan"])).fetchone()
+            current = datetime.now(timezone.utc)
+            if existing and existing["current_period_end"]:
+                try:
+                    previous_end = datetime.fromisoformat(existing["current_period_end"].replace("Z", "+00:00"))
+                    if provider == "paystack" and previous_end > current:
+                        current = previous_end
+                except ValueError:
+                    pass
+            period_end = (current + timedelta(days=30)).isoformat()
+            provider_subscription_id = existing["provider_subscription_id"] if existing else None
+            if provider == "paystack" and existing and existing["current_period_end"]:
+                period_end = existing["current_period_end"]
             conn.execute("""INSERT INTO billing_subscriptions
                 (id,provider,customer_email,plan,status,current_period_end,provider_subscription_id,
                  last_payment_reference,created_at,updated_at)
                 VALUES(?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(provider,customer_email,plan) DO UPDATE SET
                  status='active',current_period_end=excluded.current_period_end,
+                 provider_subscription_id=COALESCE(excluded.provider_subscription_id,billing_subscriptions.provider_subscription_id),
                  last_payment_reference=excluded.last_payment_reference,updated_at=excluded.updated_at""",
                 (sub_id, provider, row["customer_email"], row["plan"], "active", period_end,
-                 None, reference, now, now))
+                 provider_subscription_id, reference, now, now))
 
 
 async def _post_json(url, headers, body):
