@@ -9,7 +9,6 @@ from .omonux_integrations import secret_or_env, read_secret, store_secret, send_
 from . import main as app_main
 
 router=APIRouter(prefix="/api/v1/youtube",tags=["YouTube Automation"])
-DB=Path(os.getenv("DATABASE_PATH","./agentforge.db"))
 def cfg(name, env, default=""):
  return secret_or_env(name, env, default)
 
