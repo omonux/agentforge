@@ -499,8 +499,9 @@ async def auto_trade_run_once():
  daily_pnl=sum(float(e["pnl"] or 0) for e in day_events if e["event_type"]=="PAPER_EXIT")
  equity=10000.0
  if daily_pnl <= -(equity*settings["max_daily_loss_percent"]/100):
-  auto_event("RISK_BLOCK",details="Maximum daily loss limit reached")
-  raise HTTPException(409,"Daily loss limit reached. Engine remains stopped until manually restarted.")
+  with db() as c: c.execute("UPDATE auto_trade_settings SET running=0,updated=? WHERE id=1",(stamp(),))
+  auto_event("RISK_BLOCK",details="Maximum daily loss limit reached; engine stopped")
+  raise HTTPException(409,"Daily loss limit reached. The engine has been stopped; review the audit log before restarting.")
  actions=[]
  # Manage existing positions first using latest closed candle prices.
  open_positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened")
