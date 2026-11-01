@@ -412,11 +412,22 @@ def auth_config():
   return None
  return secret.encode(),password,salt.encode()
 
+def ensure_auth_sessions_table():
+ with db() as conn:
+  conn.execute("CREATE TABLE IF NOT EXISTS auth_sessions(session_hash TEXT PRIMARY KEY,expires_at INTEGER NOT NULL,revoked_at INTEGER)")
+
 def make_session(secret:bytes):
  expiry=int(time.time())+60*60*8
- payload=f"owner:{expiry}"
+ session_id=secrets.token_urlsafe(32)
+ payload=f"owner:{expiry}:{session_id}"
  signature=hmac.new(secret,payload.encode(),hashlib.sha256).digest()
- return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")+"."+base64.urlsafe_b64encode(signature).decode().rstrip("=")
+ token=base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")+"."+base64.urlsafe_b64encode(signature).decode().rstrip("=")
+ ensure_auth_sessions_table()
+ session_hash=hashlib.sha256(session_id.encode()).hexdigest()
+ with db() as conn:
+  conn.execute("DELETE FROM auth_sessions WHERE expires_at<?",(int(time.time())-86400,))
+  conn.execute("INSERT INTO auth_sessions(session_hash,expires_at,revoked_at) VALUES(?,?,NULL)",(session_hash,expiry))
+ return token
 
 def valid_session(token:str|None,secret:bytes):
  if not token or "." not in token: return False
@@ -425,9 +436,30 @@ def valid_session(token:str|None,secret:bytes):
   payload=base64.urlsafe_b64decode(p+"="*((4-len(p)%4)%4)).decode()
   signature=base64.urlsafe_b64decode(s+"="*((4-len(s)%4)%4))
   expected=hmac.new(secret,payload.encode(),hashlib.sha256).digest()
-  who,expiry=payload.split(":",1)
-  return who=="owner" and int(expiry)>int(time.time()) and hmac.compare_digest(signature,expected)
+  who,expiry,session_id=payload.split(":",2)
+  expires=int(expiry)
+  if who!="owner" or expires<=int(time.time()) or not hmac.compare_digest(signature,expected):
+   return False
+  ensure_auth_sessions_table()
+  session_hash=hashlib.sha256(session_id.encode()).hexdigest()
+  with db() as conn:
+   row=conn.execute("SELECT expires_at,revoked_at FROM auth_sessions WHERE session_hash=?",(session_hash,)).fetchone()
+  return bool(row and row["revoked_at"] is None and int(row["expires_at"])>int(time.time()))
  except Exception: return False
+
+def revoke_session(token:str|None):
+ if not token or "." not in token: return
+ try:
+  p,_=token.split(".",1)
+  payload=base64.urlsafe_b64decode(p+"="*((4-len(p)%4)%4)).decode()
+  _,_,session_id=payload.split(":",2)
+  session_hash=hashlib.sha256(session_id.encode()).hexdigest()
+  ensure_auth_sessions_table()
+  with db() as conn:
+   conn.execute("UPDATE auth_sessions SET revoked_at=? WHERE session_hash=? AND revoked_at IS NULL",(int(time.time()),session_hash))
+ except Exception:
+  # Logout must still clear browser cookies even if the server-side revoke fails.
+  pass
 
 def cookie_secure(): return os.getenv("COOKIE_SECURE","true").lower()=="true"
 
@@ -452,7 +484,8 @@ def auth_login(data:LoginInput,request:Request,response:Response):
  return {"authenticated":True,"username":"owner","csrf_token":csrf,"expires_in":28800}
 
 @app.post("/api/v1/auth/logout")
-def auth_logout(response:Response):
+def auth_logout(request:Request,response:Response):
+ revoke_session(request.cookies.get(SESSION_COOKIE))
  response.delete_cookie(SESSION_COOKIE,path="/",secure=cookie_secure(),httponly=True,samesite="strict")
  response.delete_cookie(CSRF_COOKIE,path="/",secure=cookie_secure(),samesite="strict")
  return {"authenticated":False}
