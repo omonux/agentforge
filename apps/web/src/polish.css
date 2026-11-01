@@ -52,3 +52,21 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .pulseactionicon{width:30px;height:30px;display:grid;place-items:center;background:#29244f;color:#b2a7ff;border-radius:8px}
 @media(max-width:900px){.pulsegrid{grid-template-columns:1fr 1fr}.pulsehero{grid-column:1/-1;grid-row:auto}}
 @media(max-width:600px){.pulsegrid{grid-template-columns:1fr}.pulsehero{grid-column:auto}.pulsemetrics{gap:22px}.pulsehero h2{font-size:20px}}
+
+/* Unified department overview */
+.department-strip{margin:18px 0 24px;padding:22px;border:1px solid var(--line,#263244);border-radius:18px;background:var(--panel,#111827)}
+.department-strip-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.department-strip-head h3{margin:5px 0 0;font-size:19px}
+.department-strip-head>span{font-size:12px;color:var(--muted,#94a3b8)}
+.department-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.department-card{display:flex;flex-direction:column;align-items:flex-start;gap:7px;min-width:0;padding:14px;border:1px solid var(--line,#263244);border-radius:13px;background:rgba(255,255,255,.02);color:inherit;text-align:left;cursor:pointer;transition:border-color .15s,transform .15s}
+.department-card:hover{border-color:var(--accent,#64748b);transform:translateY(-1px)}
+.department-card b{font-size:14px}
+.department-card small{min-height:34px;color:var(--muted,#94a3b8);font-size:11px;line-height:1.5}
+.department-state{font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;padding:4px 7px;border-radius:99px;background:rgba(148,163,184,.12);color:var(--muted,#94a3b8)}
+.department-state.ready{color:#86efac;background:rgba(34,197,94,.1)}
+.department-state.needs_setup{color:#fcd34d;background:rgba(245,158,11,.1)}
+.department-state.limited,.department-state.disabled{color:#cbd5e1;background:rgba(148,163,184,.12)}
+.department-open{font-size:11px;color:var(--accent,#94a3b8);margin-top:auto}
+@media(max-width:900px){.department-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.department-grid{grid-template-columns:1fr}}

@@ -26,11 +26,11 @@
 - [ ] Review Render logs, resource use, rate limits, error handling and service restart behavior.
 - [ ] Keep the service private / access-controlled until an independent production security review is complete.
 
-## Not implemented — do not promise at launch
+## Remaining integration work — do not promise as complete\n\n- [ ] Finish end-to-end YouTube video rendering with model-specific input mapping, asynchronous polling, voice/audio and captions; validate actual MP4 output.\n- [ ] Add idempotent upload state transitions and safe recovery for interrupted YouTube uploads.\n- [ ] Add YouTube channel analytics for views/subscribers/revenue where YouTube API permissions allow; revenue requires eligible YouTube Analytics access.\n- [ ] Add opt-in Telegram notifications for publishing status and available channel metrics.\n- [ ] Add a real workflow runner with connector permissions, durable job queue, retries, audit log and approval gates.\n- [ ] Move all departments to a shared production database and validate migrations/backups before public launch.\n\n## Not implemented — do not promise at launch
 
 - Automated trend discovery to select trending topics.
 - End-to-end 30-second vertical video production with generated voice/audio and captions.
-- YouTube OAuth connection, upload scheduling and automatic publishing.
+- Fully validated YouTube OAuth, reliable asynchronous rendering, scheduled publishing and duplicate-safe upload recovery.
 - YouTube views, subscriber growth and revenue analytics or Telegram reporting for those metrics.
 - General-purpose workflow execution across external apps.
 - Multi-user / multi-tenant accounts, billing, roles and tenant isolation.
