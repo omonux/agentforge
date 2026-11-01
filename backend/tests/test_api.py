@@ -240,3 +240,28 @@ def test_omonux_telegram_test_requires_saved_credentials(tmp_path, monkeypatch):
         response = client.post("/api/v1/trading/integrations/telegram/test")
         assert response.status_code == 409
 
+
+
+def test_omonux_exchange_testnet_requires_saved_credentials(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "exchange-testnet.db")
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        binance = client.post("/api/v1/trading/exchanges/binance/test")
+        bybit = client.post("/api/v1/trading/exchanges/bybit/test")
+        assert binance.status_code == 409
+        assert bybit.status_code == 409
+        assert "Save both Binance" in binance.json()["detail"]
+        assert "Save both Bybit" in bybit.json()["detail"]
+
+
+def test_omonux_exchange_testnet_signatures_are_deterministic():
+    from app.omonux_exchange_testnet import binance_signature, bybit_signature
+
+    params = {"recvWindow": "5000", "timestamp": "1700000000000"}
+    first = binance_signature("test-secret", params)
+    assert first == binance_signature("test-secret", params)
+    assert len(first) == 64
+    signature = bybit_signature("test-secret", "1700000000000", "test-key", "accountType=UNIFIED")
+    assert signature == bybit_signature("test-secret", "1700000000000", "test-key", "accountType=UNIFIED")
+    assert len(signature) == 64
