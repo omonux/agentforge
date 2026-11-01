@@ -7,7 +7,7 @@ An AI workforce workspace for small businesses.
 - Content Studio: original scripts, hooks and captions.
 - Automation: reviewable workflow plans.
 - Research: source-aware reports.
-- Omonux Trading: isolated paper-trading journal; live trading disabled.
+- Omonux Trading: paper journal, position accounting, watchlists and an SMA backtester using user-supplied historical closes; live trading disabled.
 
 ## Structure
 - `apps/web`: React + TypeScript + Vite dashboard.
@@ -37,4 +37,4 @@ Set `AI_BASE_URL`, `AI_API_KEY` and `AI_MODEL` in backend/.env for real model-ba
 A task is complete only after a successful provider response. Missing provider configuration is reported as an error, not replaced with fake output. External messaging, publishing, payments and trading require separate integrations and explicit approvals. Omonux Trading is paper-only and does not place live orders or promise returns.
 
 ## Status
-Active foundation, not production-ready. Authentication, tenant isolation, PostgreSQL, durable queues, file ingestion, connectors, billing, tests, monitoring and deployment hardening are still required before a public paid launch.
+Active foundation, not production-ready. CRM leads, support tickets, content records, workflow plans, paper portfolio accounting and strategy backtests now have persistent API routes and dashboard screens. CI runs backend tests and the frontend production build. Authentication, tenant isolation, PostgreSQL, durable queues, file ingestion, real social/CRM connectors, market-data licensing, billing, monitoring and deployment hardening are still required before a public paid launch. Do not expose the development API to the public internet or store sensitive customer data until authentication and tenant isolation are implemented.
