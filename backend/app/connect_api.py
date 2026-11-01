@@ -203,8 +203,8 @@ async def test_connection(service_id: str):
                 message="OPay credentials are saved. Complete the merchant-specific sandbox checkout test before enabling billing."
         else:
             raise HTTPException(400,"No test is available for this service.")
-        _save_check(service_id,"connected",message)
-        return {"service":service_id,"status":"connected","message":message}
+        _save_check(service_id,"configured" if service_id=="youtube" else ("manual" if service_id=="payments" and not read_secret("paystack_secret_key") else "connected"),message)
+        return {"service":service_id,"status":"configured" if service_id=="youtube" else ("manual" if service_id=="payments" and not read_secret("paystack_secret_key") else "connected"),"message":message}
     except HTTPException as exc:
         _save_check(service_id,"error",str(exc.detail))
         raise
