@@ -173,11 +173,11 @@ async def send_analytics_to_telegram(days:int=28):
  report=await fetch_channel_analytics(days)
  totals=report["totals"]
  revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: not available (check monetization and Google Analytics permission)"
- message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\\n"
-          +"Views: "+str(totals["views"])+"\\n"
-          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\\n"
-          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\\n"
-          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\\n"
+ message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\n"
+          +"Views: "+str(totals["views"])+"\n"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\n"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\n"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\n"
           +revenue)
  sent=await send_telegram_message(message)
  if not sent: raise HTTPException(409,"Configure and test Telegram in Connect API first.")
