@@ -36,7 +36,7 @@ def conn():
  c.execute("""CREATE TABLE IF NOT EXISTS yt_drafts(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,script TEXT NOT NULL,topic TEXT NOT NULL,video_path TEXT,thumbnail_path TEXT,status TEXT NOT NULL,privacy TEXT NOT NULL,created TEXT NOT NULL,published_url TEXT,published_at TEXT,error TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_oauth_states(state TEXT PRIMARY KEY,created TEXT NOT NULL)""")
  columns={r["name"] for r in c.execute("PRAGMA table_info(yt_drafts)").fetchall()}
- for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT")):
+ for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT"),("telegram_daily_report_enabled","INTEGER NOT NULL DEFAULT 0"),("last_telegram_report_at","TEXT")):
   if name not in columns: c.execute(f"ALTER TABLE yt_drafts ADD COLUMN {name} {definition}")
  c.commit(); return c
 
@@ -51,6 +51,8 @@ class Draft(BaseModel):
 class Approve(BaseModel):
  confirmed:bool
  privacy:str=Field(default="private",pattern="^(private|unlisted|public)$")
+class DailyReportIn(BaseModel):
+ enabled:bool
 
 def token_row():
  with conn() as c: row=c.execute("SELECT * FROM yt_settings WHERE id=1").fetchone()
@@ -173,6 +175,50 @@ async def fetch_channel_analytics(days:int=28):
 async def channel_analytics(days:int=28):
  if days<7 or days>90: raise HTTPException(400,"days must be between 7 and 90.")
  return await fetch_channel_analytics(days)
+
+
+@router.get("/notifications/daily")
+def daily_report_status():
+ row=token_row()
+ with conn() as c:
+  settings=c.execute("SELECT telegram_daily_report_enabled,last_telegram_report_at FROM yt_settings WHERE id=1").fetchone()
+ return {"enabled":bool(settings and settings["telegram_daily_report_enabled"]),"last_sent_at":settings["last_telegram_report_at"] if settings else None,
+         "youtube_connected":bool(row and read_secret("youtube_refresh_token")),
+         "telegram_configured":bool(read_secret("telegram_bot_token") and read_secret("telegram_chat_id"))}
+
+@router.put("/notifications/daily")
+def set_daily_report(req:DailyReportIn):
+ if req.enabled and not (read_secret("telegram_bot_token") and read_secret("telegram_chat_id")):
+  raise HTTPException(409,"Configure and test Telegram in Connect API before enabling daily reports.")
+ if req.enabled and not read_secret("youtube_refresh_token"):
+  raise HTTPException(409,"Connect your YouTube channel before enabling daily analytics reports.")
+ with conn() as c:
+  c.execute("UPDATE yt_settings SET telegram_daily_report_enabled=? WHERE id=1",(1 if req.enabled else 0,))
+ return {"enabled":req.enabled,"message":"Daily Telegram analytics enabled." if req.enabled else "Daily Telegram analytics disabled."}
+
+async def maybe_send_daily_analytics_report():
+ row=token_row()
+ if not row or not read_secret("youtube_refresh_token"): return False
+ with conn() as c: settings=c.execute("SELECT telegram_daily_report_enabled,last_telegram_report_at FROM yt_settings WHERE id=1").fetchone()
+ if not settings or not settings["telegram_daily_report_enabled"]: return False
+ last=settings["last_telegram_report_at"]
+ if last:
+  try:
+   if datetime.fromisoformat(last)>datetime.now(timezone.utc)-timedelta(hours=24): return False
+  except ValueError: pass
+ if not (read_secret("telegram_bot_token") and read_secret("telegram_chat_id")): return False
+ report=await fetch_channel_analytics(28); totals=report["totals"]
+ revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: unavailable for this channel/permission"
+ message=("AgentForge daily YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\\n"
+          +"Views: "+str(totals["views"])+"\\n"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\\n"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\\n"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\\n"
+          +revenue)
+ sent=await send_telegram_message(message)
+ if sent:
+  with conn() as c: c.execute("UPDATE yt_settings SET last_telegram_report_at=? WHERE id=1",(now(),))
+ return bool(sent)
 
 @router.post("/analytics/send-telegram")
 async def send_analytics_to_telegram(days:int=28):
