@@ -11,7 +11,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_UP
 from urllib.parse import urlencode
 
 import httpx
@@ -32,7 +32,7 @@ def ensure_tables():
         conn.execute("""CREATE TABLE IF NOT EXISTS live_order_previews(
             id TEXT PRIMARY KEY, exchange_name TEXT NOT NULL, symbol TEXT NOT NULL,
             side TEXT NOT NULL, quantity TEXT NOT NULL, quote_price TEXT NOT NULL,
-            notional_usdt TEXT NOT NULL, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL,
+            limit_price TEXT NOT NULL DEFAULT '0', notional_usdt TEXT NOT NULL, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL,
             state TEXT NOT NULL DEFAULT 'pending', response TEXT)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS live_orders(
             id TEXT PRIMARY KEY, preview_id TEXT NOT NULL UNIQUE, exchange_order_id TEXT,
@@ -42,6 +42,9 @@ def ensure_tables():
         conn.execute("""CREATE TABLE IF NOT EXISTS live_trading_state(
             id INTEGER PRIMARY KEY CHECK(id=1), emergency_stopped INTEGER NOT NULL DEFAULT 1,
             reason TEXT, updated TEXT NOT NULL)""")
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(live_order_previews)")}
+        if "limit_price" not in columns:
+            conn.execute("ALTER TABLE live_order_previews ADD COLUMN limit_price TEXT NOT NULL DEFAULT '0'")
         conn.execute("INSERT OR IGNORE INTO live_trading_state(id,emergency_stopped,updated) VALUES(1,1,?)", (stamp(),))
 
 
@@ -184,7 +187,14 @@ async def preview_binance_order(request: PreviewRequest):
     if quantity < minimum_qty or (maximum_qty > 0 and quantity > maximum_qty):
         raise HTTPException(400, "Quantity is outside Binance LOT_SIZE limits.")
     price = dec(ticker.get("price"), "market price")
-    notional = quantity * price
+    price_filter = filters.get("PRICE_FILTER", {})
+    tick = dec(price_filter.get("tickSize", "0.00000001"), "price tick")
+    if tick <= 0:
+        raise HTTPException(502, "Binance returned an invalid price tick.")
+    raw_limit = price * (Decimal("1.005") if request.side.upper() == "BUY" else Decimal("0.995"))
+    rounding = ROUND_UP if request.side.upper() == "BUY" else ROUND_DOWN
+    limit_price = (raw_limit / tick).to_integral_value(rounding=rounding) * tick
+    notional = quantity * limit_price
     per_order, daily_limit = risk_limits()
     if notional > per_order:
         raise HTTPException(400, f"Order notional {notional:.8f} USDT exceeds the configured per-order cap of {per_order} USDT.")
@@ -208,15 +218,15 @@ async def preview_binance_order(request: PreviewRequest):
     preview_id = str(uuid.uuid4())
     expiry = int(time.time()) + PREVIEW_TTL_SECONDS
     with db() as conn:
-        conn.execute("INSERT INTO live_order_previews(id,exchange_name,symbol,side,quantity,quote_price,notional_usdt,created_at,expires_at,state) VALUES(?,?,?,?,?,?,?,?,?,'pending')",
-            (preview_id, "binance", symbol, request.side.upper(), str(quantity), str(price), str(notional), stamp(), expiry))
+        conn.execute("INSERT INTO live_order_previews(id,exchange_name,symbol,side,quantity,quote_price,limit_price,notional_usdt,created_at,expires_at,state) VALUES(?,?,?,?,?,?,?,?,?,?,'pending')",
+            (preview_id, "binance", symbol, request.side.upper(), str(quantity), str(price), str(limit_price), str(notional), stamp(), expiry))
     return {
         "preview_id": preview_id, "exchange": "Binance Spot LIVE", "symbol": symbol,
-        "side": request.side.upper(), "order_type": "MARKET", "quantity": str(quantity),
-        "reference_price": str(price), "estimated_notional_usdt": str(notional),
+        "side": request.side.upper(), "order_type": "LIMIT IOC (price-protected)", "quantity": str(quantity),
+        "reference_price": str(price), "limit_price": str(limit_price), "maximum_notional_usdt": str(notional),
         "per_order_limit_usdt": str(per_order), "daily_limit_usdt": str(daily_limit),
         "expires_at": expiry, "confirmation_text": f"PLACE LIVE {request.side.upper()} {symbol}",
-        "warning": "Market orders can fill at a different price. Fees and slippage may apply. This preview is valid for 60 seconds only.",
+        "warning": "Price-protected LIMIT IOC: fills only at this limit or better; unfilled remainder is cancelled. Partial fills are possible; fees apply. Preview valid for 60 seconds.",
         "execution_enabled": os.getenv("LIVE_TRADING_ENABLED", "").lower() == "true",
     }
 
@@ -265,7 +275,8 @@ async def place_binance_order(request: PlaceRequest):
             conn.execute("UPDATE live_order_previews SET state='price_moved' WHERE id=? AND state='pending'", (request.preview_id,))
         raise HTTPException(409, "Market price moved more than 0.5% since preview. Generate a new preview and review it.")
     quantity = dec(preview["quantity"], "quantity")
-    notional = quantity * current_price
+    limit_price = dec(preview["limit_price"], "limit price")
+    notional = quantity * limit_price
     symbol_info = await public_binance_get("/api/v3/exchangeInfo", {"symbol": preview["symbol"]})
     rules = next((item for item in symbol_info.get("symbols", []) if item.get("symbol") == preview["symbol"]), None)
     if not rules or rules.get("status") != "TRADING" or not rules.get("isSpotTradingAllowed", False):
@@ -293,8 +304,9 @@ async def place_binance_order(request: PlaceRequest):
             raise HTTPException(409, "This preview is already being processed.")
     client_order_id = "AF" + request.preview_id.replace("-", "")[:30]
     params = {
-        "symbol": preview["symbol"], "side": preview["side"], "type": "MARKET",
-        "quantity": str(quantity), "newClientOrderId": client_order_id,
+        "symbol": preview["symbol"], "side": preview["side"], "type": "LIMIT",
+        "timeInForce": "IOC", "quantity": str(quantity), "price": str(limit_price),
+        "newClientOrderId": client_order_id,
         "newOrderRespType": "FULL", "recvWindow": RECV_WINDOW,
         "timestamp": str(int(time.time() * 1000)),
     }
