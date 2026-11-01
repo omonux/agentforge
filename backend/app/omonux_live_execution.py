@@ -284,7 +284,8 @@ async def place_binance_order(request: PlaceRequest):
     if notional > per_order:
         raise HTTPException(400, "Current estimated notional now exceeds the per-order risk cap.")
     with db() as conn:
-        used = conn.execute("SELECT COALESCE(SUM(CAST(quote_quantity AS REAL)),0) AS total FROM live_orders WHERE created_at >= ?", (datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0).isoformat(),)).fetchone()["total"]
+        conn.execute("BEGIN IMMEDIATE")
+        used = conn.execute("SELECT COALESCE(SUM(CAST(notional_usdt AS REAL)),0) AS total FROM live_order_previews WHERE state IN ('submitting','submitted','unknown') AND created_at >= ?", (datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0).isoformat(),)).fetchone()["total"]
         if dec(used, "daily usage") + notional > daily_limit:
             raise HTTPException(400, "Current order would exceed the daily notional risk cap.")
         # Atomically claim the preview and reserve its full estimated notional.
