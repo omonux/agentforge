@@ -104,3 +104,57 @@ def test_private_routes_require_login(tmp_path, monkeypatch):
         assert client.post("/api/v1/auth/login", json={"username":"owner","password":"strong-test-password-12345"}).status_code == 200
         assert client.get("/api/v1/crm/leads").status_code == 200
         assert client.post("/api/v1/crm/leads", json={"name":"Blocked"}).status_code == 403
+
+
+def test_omonux_auto_paper_engine_controls_and_cycle(tmp_path, monkeypatch):
+    import asyncio
+    monkeypatch.setattr(main, "DB", tmp_path / "auto.db")
+
+    async def fake_candles(symbol, interval="30m", limit=120):
+        return [
+            {"time": i, "open": 100 + i, "high": 101 + i,
+             "low": 99 + i, "close": 100 + i, "volume": 10}
+            for i in range(120)
+        ]
+
+    monkeypatch.setattr(main, "fetch_candles", fake_candles)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        status = client.get("/api/v1/trading/auto/status")
+        assert status.status_code == 200
+        assert status.json()["running"] is False
+        assert status.json()["settings"]["mode"] == "paper"
+
+        rejected = client.post("/api/v1/trading/auto/run-once")
+        assert rejected.status_code == 409
+
+        config = client.put("/api/v1/trading/auto/config", json={
+            "mode": "paper", "risk_percent": 1,
+            "min_confidence": 60, "max_open_positions": 2,
+            "max_daily_loss_percent": 5, "cooldown_minutes": 0,
+            "max_trades_per_day": 5, "max_notional_percent": 25
+        })
+        assert config.status_code == 200
+
+        started = client.post("/api/v1/trading/auto/start")
+        assert started.status_code == 200 and started.json()["running"] is True
+
+        cycle = client.post("/api/v1/trading/auto/run-once")
+        assert cycle.status_code == 200
+        assert cycle.json()["mode"] == "paper_only"
+        assert all(a["action"] == "OPEN_PAPER" for a in cycle.json()["actions"])
+        assert len(cycle.json()["actions"]) <= 2
+
+        events = client.get("/api/v1/trading/auto/events").json()
+        assert any(e["event_type"] == "PAPER_ENTRY" for e in events)
+
+        stopped = client.post("/api/v1/trading/auto/stop")
+        assert stopped.status_code == 200 and stopped.json()["running"] is False
+
+
+def test_omonux_auto_engine_rejects_live_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "auto-live.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.put("/api/v1/trading/auto/config", json={"mode": "live"})
+        assert response.status_code == 400
