@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .main import db, stamp
 
 router = APIRouter(prefix="/api/v1/trading/integrations", tags=["OMONUX Integrations"])
-ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "binance_live_api_key", "binance_live_api_secret", "bybit_live_api_key", "bybit_live_api_secret", "telegram_bot_token", "telegram_chat_id", "ai_api_key", "ai_base_url", "ai_model", "image_api_key", "image_base_url", "image_model", "replicate_api_token", "replicate_model", "youtube_client_id", "youtube_client_secret", "youtube_redirect_uri", "youtube_region", "elevenlabs_api_key", "elevenlabs_voice_id", "elevenlabs_model", "paystack_secret_key", "paystack_public_key", "paystack_pro_monthly_plan_code", "paystack_business_monthly_plan_code", "opay_public_key", "opay_secret_key", "opay_merchant_id", "opay_api_base_url", "opay_country", "opay_currency", "youtube_access_token", "youtube_refresh_token"}
+ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "binance_live_api_key", "binance_live_api_secret", "bybit_live_api_key", "bybit_live_api_secret", "telegram_bot_token", "telegram_chat_id", "ai_api_key", "ai_base_url", "ai_model", "image_api_key", "image_base_url", "image_model", "replicate_api_token", "replicate_model", "youtube_client_id", "youtube_client_secret", "youtube_redirect_uri", "youtube_region", "elevenlabs_api_key", "elevenlabs_voice_id", "elevenlabs_model", "paystack_secret_key", "paystack_public_key", "paystack_pro_monthly_plan_code", "paystack_business_monthly_plan_code", "opay_public_key", "opay_secret_key", "opay_merchant_id", "opay_api_base_url", "opay_country", "opay_currency"}
 
 
 def cipher():
