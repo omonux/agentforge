@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: agentforge
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    branch: rebuild/agentforge-platform
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    disk:
+      name: agentforge-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_PATH
+        value: /data/agentforge.db
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: AI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: AI_MODEL
+        value: gpt-4.1-mini
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_PASSWORD_SALT
+        generateValue: true
+      - key: AI_API_KEY
+        sync: false
