@@ -7,6 +7,7 @@ AgentForge is a private, single-owner AI operations workspace. OMONUX is its tra
 - **AI workforce:** support, sales, content, workflow-planning and research agents backed by a configured OpenAI-compatible provider.
 - **Business workspace:** persistent CRM leads, support tickets, content drafts and reviewable workflow plans.
 - **OMONUX Trading:** Binance public market candles and indicators, paper trading, automatic paper strategy controls, chart-image analysis, encrypted exchange integrations, read-only account checks, guarded manual Spot execution, order reconciliation, FIFO analytics, EMA research and opt-in Telegram alerts.
+- **Billing foundation:** Paystack card checkout and OPay hosted BankCard checkout, signed callbacks, server-side transaction verification and payment/subscription records. Billing is disabled by default.
 - **Security:** owner sign-in, HttpOnly session cookie, CSRF protection, login throttling and encrypted integration secrets.
 
 ## Current release scope and limitations
@@ -92,3 +93,25 @@ A successful CI build does not mean a Render service has been created or deploye
 ## Verification
 
 GitHub Actions runs backend pytest tests and the frontend TypeScript/Vite production build. The OMONUX integration head `0c5dc51e7a04101ecac117d8baf46abe4d5ddb18` passed both jobs in CI run #210. That verifies those automated checks only; it does not replace deployment, integration, security, exchange-testnet or backup/restore testing.
+
+## Payments and paid plans
+
+AgentForge now contains a **disabled-by-default payment integration foundation**:
+
+- Paystack hosted card checkout in NGN. Recurring billing is available only when a matching Paystack monthly plan code is configured in the Paystack dashboard and the amount matches the AgentForge plan price.
+- OPay hosted cashier checkout with the BankCard method requested. OPay sends the customer to its hosted checkout; AgentForge does not receive or store card number or CVV data.
+- Paystack callbacks are HMAC-SHA512 verified and the transaction is fetched again from Paystack before a payment is marked successful.
+- OPay callbacks are validated using OPay's documented HMAC-SHA3-512 canonical signature and independently checked against OPay's cashier status API before a payment is marked successful.
+- Payment references are unique and successful callback processing is idempotent.
+
+Configure the following privately in the hosting dashboard:
+
+- `BILLING_BASE_URL`: public HTTPS application URL.
+- `BILLING_LIVE_ENABLED=false`: keep disabled until both providers pass sandbox and production readiness checks.
+- `AGENTFORGE_PRO_MONTHLY_NGN` and `AGENTFORGE_BUSINESS_MONTHLY_NGN`: monthly plan prices as whole naira.
+- `PAYSTACK_SECRET_KEY`; optionally `PAYSTACK_PRO_MONTHLY_PLAN_CODE` and `PAYSTACK_BUSINESS_MONTHLY_PLAN_CODE` for recurring subscriptions.
+- `OPAY_PUBLIC_KEY`, `OPAY_SECRET_KEY`, `OPAY_MERCHANT_ID`, and confirm `OPAY_API_BASE_URL` with OPay for your approved NGN merchant account.
+
+The current app still has single-owner authentication. Billing records are stored by customer email, but **customer entitlements are not enforced** and there is no tenant isolation or public customer registration. Do not sell or grant paid access to customers until the multi-tenant account, entitlement, renewal, cancellation, refund, chargeback and support flows are implemented and reviewed. OPay recurring billing is not assumed; OPay renewals are manual in this foundation.
+
+Never collect card details in AgentForge forms, never paste merchant keys into chat or Git, and never enable live billing before sandbox testing and a security review.
