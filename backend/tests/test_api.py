@@ -599,6 +599,10 @@ def test_connect_api_vault_is_encrypted_and_wires_provider_settings(tmp_path, mo
     import sqlite3
     monkeypatch.setattr(main, "DB", tmp_path / "connect-api.db")
     monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret-that-is-long-enough-123456")
+    monkeypatch.setenv("ADMIN_PASSWORD", "strong-test-password-12345")
+    monkeypatch.setenv("ADMIN_PASSWORD_SALT", "test-salt-0123456789abcdef")
+    monkeypatch.setenv("COOKIE_SECURE", "false")
     monkeypatch.delenv("AI_API_KEY", raising=False)
     monkeypatch.delenv("AI_BASE_URL", raising=False)
     monkeypatch.delenv("AI_MODEL", raising=False)
