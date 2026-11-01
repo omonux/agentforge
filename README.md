@@ -1,84 +1,77 @@
-# 🤖 AgentForge
+# AgentForge by Omonux
+An AI workforce workspace for small businesses.
 
-**AI Agents That Do Your Work.**
+## Modules
+- Customer support: policy-grounded draft replies and escalation.
+- Sales: prospect qualification and outreach drafts.
+- Content Studio: original scripts, hooks and captions.
+- Automation: reviewable workflow plans.
+- Research: source-aware reports.
+- Omonux Trading: paper journal, position accounting, watchlists and an SMA backtester using user-supplied historical closes; live trading disabled.
 
-AgentForge is a platform that builds, deploys, and manages autonomous AI agents for your business. Research, sales outreach, customer support, data entry — all automated in minutes.
+## Structure
+- `apps/web`: React + TypeScript + Vite dashboard.
+- `backend`: FastAPI API, SQLite development persistence and configurable chat-completion provider.
+- `index.html`: original landing page retained during migration.
 
-## ✨ Features
-
-- 🔍 **Research Agents** — Scrape the web, compile reports, deliver insights in seconds
-- ✉️ **Outreach Agents** — Draft personalized cold emails, follow-ups, and sequences
-- 📊 **Data Agents** — Parse, clean, and analyze spreadsheets and databases
-- 💬 **Support Agents** — Handle customer tickets 24/7 with natural language
-- ⚡ **Workflow Automation** — Chain agents into pipelines across your stack
-- 🔐 **Enterprise Security** — SOC 2, data isolation, role-based access
-
-## 🚀 Live Demo
-
-The landing page includes a **working AI agent chat** — try it:
-
+## Run locally
+Backend:
 ```bash
-cd agentforge
-python3 -m http.server 8080
-# Open http://localhost:8080
+cd backend
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --port 8000
 ```
-
-Ask the agent to:
-- "Research the AI market"
-- "Draft a cold email"
-- "Plan my SaaS launch"
-- "Analyze my sales data"
-
-## 💰 Pricing
-
-| Plan | Price | What You Get |
-|------|-------|--------------|
-| Starter | Free | 1 agent, 100 tasks/mo |
-| Pro | $49/mo | Unlimited agents, 10k tasks, API |
-| Enterprise | Custom | Dedicated infra, SLA, SSO |
-
-## 🛠 Tech Stack
-
-- Pure HTML/CSS/JS (zero dependencies)
-- Single-file deployment
-- Responsive design
-- Dark theme
-
-## 📦 Deploy
-
-### Option 1: GitHub Pages
+Frontend:
 ```bash
-# In repo Settings → Pages → set source to main branch
-# Site goes live at https://<username>.github.io/agentforge
+cd apps/web
+npm install
+npm run dev
 ```
+Set `AI_BASE_URL`, `AI_API_KEY` and `AI_MODEL` in backend/.env for real model-backed tasks. Never commit credentials.
 
-### Option 2: Vercel
-```bash
-npm i -g vercel
-vercel
-```
+## Safety and truth in product
+A task is complete only after a successful provider response. Missing provider configuration is reported as an error, not replaced with fake output. External messaging, publishing, payments and trading require separate integrations and explicit approvals. Omonux Trading is paper-only and does not place live orders or promise returns.
 
-### Option 3: Netlify
-```bash
-npm i -g netlify-cli
-netlify deploy --prod
-```
+## Status
+Active foundation, not production-ready. CRM leads, support tickets, content records, workflow plans, paper portfolio accounting and strategy backtests now have persistent API routes and dashboard screens. CI runs backend tests and the frontend production build. The private single-owner authentication layer now protects application APIs with an HttpOnly signed session cookie, PBKDF2 password verification, CSRF tokens, login throttling and a fail-closed configuration check. Multi-tenant accounts, PostgreSQL, durable queues, file ingestion, real social/CRM connectors, market-data licensing, billing, monitoring and a full production security review remain future work. This is a private single-owner deployment foundation, not a multi-customer SaaS release.
 
-### Option 4: Any static host
-Just upload `index.html` — that's the entire app.
+## Run the full stack with Docker
 
-## 📁 Structure
+1. Copy backend/.env.example to backend/.env.
+2. Add your AI provider key and model to backend/.env (keep this file private).
+3. From the repository root run:
 
-```
-agentforge/
-└── index.html    # Entire app (HTML + CSS + JS)
-```
+    docker compose up --build
 
-## 📬 Contact
+4. Open http://localhost:8080.
 
-- Email: emmanuelomonu709@gmail.com
-- GitHub: [omonux](https://github.com/omonux)
+The API and SQLite data volume are kept behind the web proxy. For local non-Docker development, run the API on port 8000 and Vite on port 5173.
 
-## 📄 License
+Docker Compose is a development deployment convenience, not a production security certification. The owner login protects the private single-owner workspace, but multi-tenant isolation, production session revocation, durable job processing, monitoring and a full security review are not implemented. Keep the service private until its production hosting, persistent storage and secrets are configured and reviewed.
 
-MIT — do whatever you want with it.
+## Private workspace sign-in
+
+AgentForge is configured as a **single-owner private workspace**. All application API routes require a valid owner session, except the health check and sign-in endpoints. Browser writes require a CSRF token. Password verification uses PBKDF2-HMAC-SHA256; the session cookie is HttpOnly, SameSite=Strict and expires after eight hours. Five failed sign-in attempts from one IP are temporarily throttled.
+
+Before starting the app, set these values in `backend/.env` (never commit that file):
+
+- `SESSION_SECRET`: a unique random secret; generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+- `ADMIN_PASSWORD`: a unique password of at least 14 characters.
+- `ADMIN_PASSWORD_SALT`: a random salt; generate with `python -c "import secrets; print(secrets.token_hex(24))"`.
+- `COOKIE_SECURE=false` only for local HTTP development. Set `COOKIE_SECURE=true` on Render or any HTTPS deployment.
+
+The sign-in username is `owner`. Do not use a password from another service. If any authentication setting is missing or still contains a sample placeholder, private API routes fail closed.
+
+For Render, add the four settings above as private environment variables in the service dashboard before deploying. Do not paste passwords or secret values into GitHub, source files, or public issue trackers. Use a strong, unique owner password and keep it in a password manager.
+
+## Render deployment
+
+The production container builds the React frontend and runs it with the FastAPI backend behind one same-origin Nginx proxy. This avoids cross-origin cookie/CSRF issues and keeps the API behind the public frontend. SQLite is configured to write to `/data/agentforge.db`, which is backed by the Render persistent disk declared in `render.yaml`.
+
+To deploy, connect this repository to Render as a Blueprint and select the `rebuild/agentforge-platform` branch. Render will ask for the two private values marked `sync: false`: `ADMIN_PASSWORD` (use a unique password of at least 14 characters) and `AI_API_KEY` (your provider key). The session secret and password salt are generated by Render. Never put these values in GitHub or chat.
+
+**Cost and availability:** this configuration uses a paid Starter web service and a 1 GB persistent disk. A disk-backed service is single-instance and redeploys can cause a brief interruption. Review the current Render price shown in your dashboard before creating the service. The service is not created automatically by committing this file.
