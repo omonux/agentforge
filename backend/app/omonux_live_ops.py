@@ -339,11 +339,17 @@ async def reconcile_orders():
                 key, secret = bybit_keys()
                 data = await bybit_request("GET", "/v5/order/realtime", key, secret,
                                            {"category": "spot", "symbol": order["symbol"], "orderId": order["exchange_order_id"]})
-                item = next(iter(data.get("list", [])), {})
+                item = next(iter(data.get("list", [])), None)
+                if not item:
+                    history = await bybit_request("GET", "/v5/order/history", key, secret,
+                                                   {"category": "spot", "symbol": order["symbol"], "orderId": order["exchange_order_id"]})
+                    item = next(iter(history.get("list", [])), {})
                 status = item.get("orderStatus", order["status"])
                 executed = item.get("cumExecQty", order["executed_quantity"] or "0")
                 quote = item.get("cumExecValue", order["quote_quantity"] or "0")
-                detail = {"order": item, "fills": []}
+                executions = await bybit_request("GET", "/v5/execution/list", key, secret,
+                                                  {"category": "spot", "symbol": order["symbol"], "orderId": order["exchange_order_id"]})
+                detail = {"order": item, "fills": executions.get("list", [])}
             else:
                 key, secret = read_secret("binance_live_api_key"), read_secret("binance_live_api_secret")
                 if not key or not secret:
@@ -358,7 +364,13 @@ async def reconcile_orders():
                 status = item.get("status", order["status"])
                 executed = item.get("executedQty", order["executed_quantity"] or "0")
                 quote = item.get("cummulativeQuoteQty", order["quote_quantity"] or "0")
-                detail = item
+                trade_params = {"symbol": order["symbol"], "orderId": order["exchange_order_id"],
+                                "recvWindow": RECV, "timestamp": str(int(time.time() * 1000))}
+                trade_params["signature"] = hmac.new(secret.encode(), urlencode(trade_params).encode(), hashlib.sha256).hexdigest()
+                async with httpx.AsyncClient(timeout=12) as client:
+                    trades_response = await client.get("https://api.binance.com/api/v3/myTrades", params=trade_params, headers={"X-MBX-APIKEY": key})
+                trades_response.raise_for_status()
+                detail = {"order": item, "fills": trades_response.json()}
             with db() as conn:
                 conn.execute("UPDATE live_orders SET status=?,executed_quantity=?,quote_quantity=?,response=? WHERE id=?",
                              (status, executed, quote, json.dumps(detail), order["id"]))
