@@ -38,3 +38,17 @@ A task is complete only after a successful provider response. Missing provider c
 
 ## Status
 Active foundation, not production-ready. CRM leads, support tickets, content records, workflow plans, paper portfolio accounting and strategy backtests now have persistent API routes and dashboard screens. CI runs backend tests and the frontend production build. Authentication, tenant isolation, PostgreSQL, durable queues, file ingestion, real social/CRM connectors, market-data licensing, billing, monitoring and deployment hardening are still required before a public paid launch. Do not expose the development API to the public internet or store sensitive customer data until authentication and tenant isolation are implemented.
+
+## Run the full stack with Docker
+
+1. Copy backend/.env.example to backend/.env.
+2. Add your AI provider key and model to backend/.env (keep this file private).
+3. From the repository root run:
+
+    docker compose up --build
+
+4. Open http://localhost:8080.
+
+The API and SQLite data volume are kept behind the web proxy. For local non-Docker development, run the API on port 8000 and Vite on port 5173.
+
+Docker Compose is a development deployment convenience, not a production security certification. The API currently lacks user login and tenant isolation; keep it private until those are implemented and reviewed.
