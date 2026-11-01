@@ -448,8 +448,8 @@ async def opay_webhook(request: Request):
     # Confirm the callback independently using OPay's transaction-status API.
     merchant_id = secret_or_env("opay_merchant_id","OPAY_MERCHANT_ID")
     api_base = secret_or_env("opay_api_base_url","OPAY_API_BASE_URL","https://sandboxapi.opaycheckout.com").rstrip("/")
-    country = os.getenv("OPAY_COUNTRY", "NG").upper()
-    currency = os.getenv("OPAY_CURRENCY", "NGN").upper()
+    country = secret_or_env("opay_country","OPAY_COUNTRY","NG").upper()
+    currency = secret_or_env("opay_currency","OPAY_CURRENCY","NGN").upper()
     query = {"reference": reference, "country": country}
     query_body = json.dumps(query, separators=(",", ":"))
     signature = hmac.new(secret.encode(), query_body.encode(), hashlib.sha512).hexdigest()
