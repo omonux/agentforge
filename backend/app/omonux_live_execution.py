@@ -120,7 +120,9 @@ def live_trading_status():
         state = conn.execute("SELECT emergency_stopped,reason,updated FROM live_trading_state WHERE id=1").fetchone()
     return {
         "exchange": "Binance Spot",
-        "feature_enabled": os.getenv("LIVE_TRADING_ENABLED", "").lower() == "true",
+        "feature_enabled": os.getenv("LIVE_TRADING_ENABLED", "").lower() == "true" or os.getenv("BYBIT_LIVE_TRADING_ENABLED", "").lower() == "true",
+        "binance_enabled": os.getenv("LIVE_TRADING_ENABLED", "").lower() == "true",
+        "bybit_enabled": os.getenv("BYBIT_LIVE_TRADING_ENABLED", "").lower() == "true",
         "emergency_stopped": bool(state["emergency_stopped"]) if state else True,
         "reason": state["reason"] if state else "Safety state not initialized",
         "scope": "Manual, individually confirmed Binance Spot market orders only",
@@ -146,8 +148,8 @@ def live_safety_reset(request: ResetRequest):
     ensure_tables()
     if request.confirmation != "RESET LIVE TRADING SAFETY":
         raise HTTPException(400, 'Type exactly "RESET LIVE TRADING SAFETY" to clear the live-trading stop latch.')
-    if os.getenv("LIVE_TRADING_ENABLED", "").lower() != "true":
-        raise HTTPException(423, "Live trading remains disabled by the server feature flag.")
+    if os.getenv("LIVE_TRADING_ENABLED", "").lower() != "true" and os.getenv("BYBIT_LIVE_TRADING_ENABLED", "").lower() != "true":
+        raise HTTPException(423, "Live trading remains disabled by the server feature flags.")
     with db() as conn:
         conn.execute("UPDATE live_trading_state SET emergency_stopped=0,reason=NULL,updated=? WHERE id=1", (stamp(),))
     return live_trading_status()
