@@ -227,13 +227,9 @@ def _captions(script:str):
  cursor=0.0; parts=[]
  for index,sentence in enumerate(sentences):
   span=duration*max(1,len(sentence.split()))/total_words
-  parts.append(f"{index+1}
-{_srt_time(cursor)} --> {_srt_time(cursor+span)}
-{sentence}
-")
+  parts.append(f"{index+1}\n{_srt_time(cursor)} --> {_srt_time(cursor+span)}\n{sentence}\n")
   cursor+=span
- return "
-".join(parts)
+ return "\n".join(parts)
 
 @router.post("/drafts/{draft_id}/voice")
 async def generate_voice(draft_id:str):
