@@ -129,7 +129,7 @@ def _mark_payment(reference, provider, status, provider_id=None):
             if existing and existing["current_period_end"]:
                 try:
                     previous_end = datetime.fromisoformat(existing["current_period_end"].replace("Z", "+00:00"))
-                    if provider == "paystack" and previous_end > current:
+                    if previous_end > current:
                         current = previous_end
                 except ValueError:
                     pass
