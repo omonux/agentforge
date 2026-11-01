@@ -46,3 +46,33 @@ def test_invalid_stage_is_rejected(tmp_path, monkeypatch):
             "name": "Bad Stage", "stage": "invented"
         })
         assert response.status_code == 400
+
+def test_paper_portfolio_prevents_short_sales_and_backtests(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "trading.db")
+    with TestClient(main.app) as client:
+        buy = client.post("/api/v1/trading/paper/trades", json={
+            "symbol": "ETHUSD", "side": "buy", "quantity": 1,
+            "reference_price": 100
+        })
+        assert buy.status_code == 200
+        rejected = client.post("/api/v1/trading/paper/trades", json={
+            "symbol": "ETHUSD", "side": "sell", "quantity": 2,
+            "reference_price": 110
+        })
+        assert rejected.status_code == 400
+        sell = client.post("/api/v1/trading/paper/trades", json={
+            "symbol": "ETHUSD", "side": "sell", "quantity": 0.5,
+            "reference_price": 120
+        })
+        assert sell.status_code == 200
+        portfolio = client.get("/api/v1/trading/paper/portfolio").json()
+        assert portfolio["realized_pnl"] == 10
+        assert portfolio["positions"][0]["quantity"] == 0.5
+
+        result = client.post("/api/v1/trading/backtests", json={
+            "symbol": "ETHUSD", "closes": list(range(100, 140)),
+            "fast_window": 2, "slow_window": 5, "initial_cash": 10000
+        })
+        assert result.status_code == 200
+        assert result.json()["report"]["data_points"] == 40
+        assert client.get("/api/v1/trading/backtests").status_code == 200
