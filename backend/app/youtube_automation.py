@@ -5,19 +5,27 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+from .omonux_integrations import secret_or_env
 
 router=APIRouter(prefix="/api/v1/youtube",tags=["YouTube Automation"])
 DB=Path(os.getenv("DATABASE_PATH","./agentforge.db"))
-CLIENT=os.getenv("YOUTUBE_CLIENT_ID","")
-SECRET=os.getenv("YOUTUBE_CLIENT_SECRET","")
-REDIRECT=os.getenv("YOUTUBE_REDIRECT_URI","http://localhost:8000/api/v1/youtube/oauth/callback")
-REGION=os.getenv("YOUTUBE_REGION","NG")
-AI_BASE=os.getenv("AI_BASE_URL","").rstrip("/")
-AI_KEY=os.getenv("AI_API_KEY","")
-AI_MODEL=os.getenv("AI_MODEL","")
-VIDEO_KEY=os.getenv("VIDEO_API_KEY","")
-VIDEO_MODEL=os.getenv("VIDEO_MODEL","")
-VIDEO_PROVIDER=os.getenv("VIDEO_PROVIDER","replicate").lower()
+def cfg(name, env, default=""):
+ return secret_or_env(name, env, default)
+
+def youtube_config():
+ return (cfg("youtube_client_id","YOUTUBE_CLIENT_ID"),
+         cfg("youtube_client_secret","YOUTUBE_CLIENT_SECRET"),
+         cfg("youtube_redirect_uri","YOUTUBE_REDIRECT_URI","http://localhost:8000/api/v1/youtube/oauth/callback"),
+         cfg("youtube_region","YOUTUBE_REGION","NG"))
+
+def ai_config():
+ return (cfg("ai_base_url","AI_BASE_URL").rstrip("/"),
+         cfg("ai_api_key","AI_API_KEY"),cfg("ai_model","AI_MODEL"))
+
+def video_config():
+ return (cfg("replicate_api_token","VIDEO_API_KEY"),
+         cfg("replicate_model","VIDEO_MODEL"),
+         os.getenv("VIDEO_PROVIDER","replicate").lower())
 VIDEO_DIR=Path(os.getenv("YOUTUBE_STORAGE_DIR","./storage/youtube")).resolve()
 SCOPES="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
 
@@ -47,9 +55,10 @@ async def access_token():
  row=token_row()
  if not row or not row["refresh_token"]: raise HTTPException(409,"Connect your YouTube channel first.")
  if row["access_token"] and row["expires_at"] and datetime.fromisoformat(row["expires_at"])>datetime.now(timezone.utc)+timedelta(seconds=60): return row["access_token"]
- if not CLIENT or not SECRET: raise HTTPException(503,"Set YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET in backend environment.")
+ client_id,client_secret,redirect_uri,_region=youtube_config()
+ if not client_id or not client_secret: raise HTTPException(503,"Open Connect API and add the Google OAuth client ID and secret.")
  async with httpx.AsyncClient(timeout=30) as h:
-  r=await h.post("https://oauth2.googleapis.com/token",data={"client_id":CLIENT,"client_secret":SECRET,"refresh_token":row["refresh_token"],"grant_type":"refresh_token"})
+  r=await h.post("https://oauth2.googleapis.com/token",data={"client_id":client_id,"client_secret":client_secret,"refresh_token":row["refresh_token"],"grant_type":"refresh_token"})
  if r.status_code>=400: raise HTTPException(502,"YouTube authorization expired. Reconnect the channel.")
  d=r.json(); expiry=(datetime.now(timezone.utc)+timedelta(seconds=int(d.get("expires_in",3600)))).isoformat()
  with conn() as c: c.execute("UPDATE yt_settings SET access_token=?,expires_at=? WHERE id=1",(d["access_token"],expiry))
@@ -58,18 +67,22 @@ async def access_token():
 @router.get("/status")
 def status():
  row=token_row()
- return {"configured":bool(CLIENT and SECRET),"connected":bool(row and row["refresh_token"]),"channel":row["channel_title"] if row else None,"region":REGION,"video_generation_configured":bool(VIDEO_KEY and VIDEO_MODEL),"video_provider":VIDEO_PROVIDER}
+ client_id,client_secret,_redirect,region=youtube_config()
+ video_key,video_model,video_provider=video_config()
+ return {"configured":bool(client_id and client_secret),"connected":bool(row and row["refresh_token"]),"channel":row["channel_title"] if row else None,"region":region,"video_generation_configured":bool(video_key and video_model),"video_provider":video_provider}
 @router.get("/oauth/start")
 def oauth_start():
- if not CLIENT or not SECRET: raise HTTPException(503,"Set YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET in backend environment.")
+ client_id,client_secret,redirect_uri,_region=youtube_config()
+ if not client_id or not client_secret: raise HTTPException(503,"Open Connect API and add the Google OAuth client ID and secret.")
  state=secrets.token_urlsafe(32)
  with conn() as c:
   c.execute("DELETE FROM yt_oauth_states WHERE created<?",((datetime.now(timezone.utc)-timedelta(minutes=20)).isoformat(),))
   c.execute("INSERT INTO yt_oauth_states VALUES(?,?)",(state,now()))
- params={"client_id":CLIENT,"redirect_uri":REDIRECT,"response_type":"code","scope":SCOPES,"access_type":"offline","prompt":"consent","state":state}
+ params={"client_id":client_id,"redirect_uri":redirect_uri,"response_type":"code","scope":SCOPES,"access_type":"offline","prompt":"consent","state":state}
  return {"authorization_url":"https://accounts.google.com/o/oauth2/v2/auth?"+urllib.parse.urlencode(params)}
 @router.get("/oauth/callback")
 async def oauth_callback(code:str="",state:str="",error:str=""):
+ client_id,client_secret,redirect_uri,_region=youtube_config()
  if error: raise HTTPException(400,"YouTube authorization was not granted.")
  with conn() as c:
   valid=c.execute("SELECT state FROM yt_oauth_states WHERE state=?",(state,)).fetchone()
@@ -77,7 +90,7 @@ async def oauth_callback(code:str="",state:str="",error:str=""):
   c.execute("DELETE FROM yt_oauth_states WHERE state=?",(state,))
  if not code: raise HTTPException(400,"Missing OAuth authorization code.")
  async with httpx.AsyncClient(timeout=30) as h:
-  r=await h.post("https://oauth2.googleapis.com/token",data={"code":code,"client_id":CLIENT,"client_secret":SECRET,"redirect_uri":REDIRECT,"grant_type":"authorization_code"})
+  r=await h.post("https://oauth2.googleapis.com/token",data={"code":code,"client_id":client_id,"client_secret":client_secret,"redirect_uri":redirect_uri,"grant_type":"authorization_code"})
  if r.status_code>=400: raise HTTPException(502,"Could not exchange YouTube authorization code.")
  d=r.json(); token=d["access_token"]
  async with httpx.AsyncClient(timeout=30) as h:
@@ -96,7 +109,7 @@ async def oauth_callback(code:str="",state:str="",error:str=""):
 async def trends(req:Discover):
  tok=await access_token()
  async with httpx.AsyncClient(timeout=35) as h:
-  r=await h.get("https://www.googleapis.com/youtube/v3/videos",params={"part":"snippet,statistics,contentDetails","chart":"mostPopular","regionCode":REGION,"maxResults":req.max_results},headers={"Authorization":"Bearer "+tok})
+  r=await h.get("https://www.googleapis.com/youtube/v3/videos",params={"part":"snippet,statistics,contentDetails","chart":"mostPopular","regionCode":youtube_config()[3],"maxResults":req.max_results},headers={"Authorization":"Bearer "+tok})
  if r.status_code>=400: raise HTTPException(502,"YouTube trend discovery failed. Check Data API quota and channel permissions.")
  rows=[]
  for v in r.json().get("items",[]):
@@ -105,14 +118,15 @@ async def trends(req:Discover):
  q=req.query.lower()
  if q not in ("","all","ai"):
   rows=[x for x in rows if q in (x["title"]+" "+x["description"]+" "+x["channel"]).lower()]
- return {"region":REGION,"items":rows,"notice":"Popular videos are discovery signals, not a guarantee of future trends. Create original videos; do not re-upload other creators' work."}
+ return {"region":youtube_config()[3],"items":rows,"notice":"Popular videos are discovery signals, not a guarantee of future trends. Create original videos; do not re-upload other creators' work."}
 
 @router.post("/drafts")
 async def create_draft(req:Draft):
- if not (AI_BASE and AI_KEY and AI_MODEL): raise HTTPException(503,"Configure AI_BASE_URL, AI_API_KEY and AI_MODEL for script generation.")
+ ai_base,ai_key,ai_model=ai_config()
+ if not (ai_base and ai_key and ai_model): raise HTTPException(503,"Open Connect API and configure the AI provider before generating scripts.")
  prompt=f"Create an original YouTube video package. Topic: {req.topic}. Style: {req.style}. Target duration: {req.duration_seconds} seconds. Return valid JSON only with keys title, description, script. Script must be original, paced for voice narration, include a strong opening hook and clear ending. Do not copy other videos or claim unverified facts."
  async with httpx.AsyncClient(timeout=90) as h:
-  r=await h.post(AI_BASE+"/chat/completions",headers={"Authorization":"Bearer "+AI_KEY},json={"model":AI_MODEL,"temperature":0.7,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":"You are a careful YouTube producer. Produce original content, never plagiarize."},{"role":"user","content":prompt}]})
+  r=await h.post(ai_base+"/chat/completions",headers={"Authorization":"Bearer "+ai_key},json={"model":ai_model,"temperature":0.7,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":"You are a careful YouTube producer. Produce original content, never plagiarize."},{"role":"user","content":prompt}]})
  if r.status_code>=400: raise HTTPException(502,"AI could not create the video script package.")
  try: package=json.loads(r.json()["choices"][0]["message"]["content"])
  except Exception: raise HTTPException(502,"AI returned an invalid video package.")
@@ -123,13 +137,14 @@ async def create_draft(req:Draft):
 
 @router.post("/drafts/{draft_id}/render")
 async def render_draft(draft_id:str):
- if VIDEO_PROVIDER!="replicate" or not (VIDEO_KEY and VIDEO_MODEL): raise HTTPException(503,"Configure VIDEO_PROVIDER=replicate, VIDEO_API_KEY and VIDEO_MODEL. Video rendering is not yet configured.")
+ video_key,video_model,video_provider=video_config()
+ if video_provider!="replicate" or not (video_key and video_model): raise HTTPException(503,"Open Connect API and configure Replicate video credentials.")
  with conn() as c: row=c.execute("SELECT * FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
  if not row: raise HTTPException(404,"Draft not found.")
  # Replicate model slug format: owner/model. It returns prediction output, which may be a video URL.
- if "/" not in VIDEO_MODEL: raise HTTPException(503,"VIDEO_MODEL must be a Replicate model slug in owner/model format.")
+ if "/" not in video_model: raise HTTPException(503,"Replicate model slug must use owner/model format.")
  async with httpx.AsyncClient(timeout=60) as h:
-  r=await h.post("https://api.replicate.com/v1/models/"+VIDEO_MODEL+"/predictions",headers={"Authorization":"Bearer "+VIDEO_KEY,"Prefer":"wait=60","Content-Type":"application/json"},json={"input":{"prompt":row["script"]}})
+  r=await h.post("https://api.replicate.com/v1/models/"+video_model+"/predictions",headers={"Authorization":"Bearer "+video_key,"Prefer":"wait=60","Content-Type":"application/json"},json={"input":{"prompt":row["script"]}})
  if r.status_code>=400: raise HTTPException(502,"Video provider rejected the render request. Check model input schema and account limits.")
  pred=r.json()
  if pred.get("status") not in ("succeeded",) or not pred.get("output"):
