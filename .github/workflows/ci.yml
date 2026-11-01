@@ -23,3 +23,12 @@ jobs:
           node-version: "20"
       - run: cd apps/web && npm install
       - run: cd apps/web && npm run build
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production container
+        run: docker build -t agentforge-ci .
+      - name: Validate Nginx configuration inside production image
+        run: docker run --rm --entrypoint nginx agentforge-ci -t
