@@ -53,7 +53,13 @@ class Approve(BaseModel):
  privacy:str=Field(default="private",pattern="^(private|unlisted|public)$")
 
 def token_row():
- with conn() as c: return c.execute("SELECT * FROM yt_settings WHERE id=1").fetchone()
+ with conn() as c: row=c.execute("SELECT * FROM yt_settings WHERE id=1").fetchone()
+ if row and (row["access_token"] or row["refresh_token"]):
+  if row["access_token"]: store_secret("youtube_access_token",row["access_token"])
+  if row["refresh_token"]: store_secret("youtube_refresh_token",row["refresh_token"])
+  with conn() as c: c.execute("UPDATE yt_settings SET access_token=NULL,refresh_token=NULL WHERE id=1")
+  with conn() as c: row=c.execute("SELECT * FROM yt_settings WHERE id=1").fetchone()
+ return row
 async def access_token():
  row=token_row()
  refresh_token=read_secret("youtube_refresh_token")
