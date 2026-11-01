@@ -392,11 +392,19 @@ async def reconcile_orders():
             previous_executed = Decimal(str(order["executed_quantity"] or "0"))
             current_executed = Decimal(str(executed or "0"))
             with db() as conn:
-                conn.execute("UPDATE live_orders SET exchange_order_id=COALESCE(exchange_order_id,?),status=?,executed_quantity=?,quote_quantity=?,response=? WHERE id=?",
-                             (item.get("orderId"), status, str(current_executed), quote, json.dumps(detail), order["id"]))
-            # Notify only when the cumulative executed quantity increases; repeated
-            # reconciliation must not spam duplicate fill messages.
-            if current_executed > previous_executed:
+                # Compare-and-set the cumulative fill value. Manual and background
+                # reconciliation can overlap; only the caller that advances the
+                # stored quantity is allowed to emit the corresponding alert.
+                updated = conn.execute(
+                    """UPDATE live_orders SET exchange_order_id=COALESCE(exchange_order_id,?),
+                       status=?,executed_quantity=?,quote_quantity=?,response=?
+                       WHERE id=? AND COALESCE(executed_quantity,'0')=?""",
+                    (item.get("orderId"), status, str(current_executed), quote, json.dumps(detail),
+                     order["id"], str(previous_executed)),
+                )
+                fill_advanced = updated.rowcount == 1 and current_executed > previous_executed
+            # Notify only after this reconciliation atomically advances the fill.
+            if fill_advanced:
                 await queue_alert("FILL" if status in ("FILLED", "Filled") else "PARTIAL_FILL",
                                   {"exchange": exchange, "symbol": order["symbol"], "side": order["side"],
                                    "newly_executed_quantity": str(current_executed-previous_executed),
