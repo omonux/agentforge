@@ -321,7 +321,6 @@ async def place_bybit(request: BybitPlace):
             (str(uuid.uuid4()), request.preview_id, order_id, client_id, preview["symbol"], preview["side"],
              preview["quantity"], "0", "0", "New", json.dumps(result), stamp(), "bybit"))
         conn.execute("UPDATE live_order_previews SET state='submitted',response=? WHERE id=?", (json.dumps(result), request.preview_id))
-    await queue_alert("FILL", {"exchange": "Bybit", "symbol": preview["symbol"], "side": preview["side"], "order_id": order_id, "status": "accepted; awaiting fill reconciliation"})
     return {"submitted": True, "exchange": "Bybit Spot LIVE", "order_id": order_id, "client_order_id": client_id,
             "status": "New", "notice": "Bybit accepted the order request; reconcile it to obtain fills and fees."}
 
@@ -331,7 +330,7 @@ async def reconcile_orders():
     ensure_ops_tables()
     results = []
     with db() as conn:
-        orders = conn.execute("SELECT * FROM live_orders WHERE status NOT IN ('FILLED','CANCELED','REJECTED','PARTIALLY_FILLED_FINAL') ORDER BY created_at DESC LIMIT 100").fetchall()
+        orders = conn.execute("SELECT * FROM live_orders WHERE status NOT IN ('FILLED','CANCELED','REJECTED','PARTIALLY_FILLED_FINAL','Filled','Cancelled','Rejected') ORDER BY created_at DESC LIMIT 100").fetchall()
     for order in orders:
         exchange = order["exchange_name"] if "exchange_name" in order.keys() else "binance"
         try:
