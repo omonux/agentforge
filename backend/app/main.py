@@ -777,3 +777,5 @@ app.include_router(youtube_automation_router)
 from .omonux_integrations import read_secret as read_integration_secret, secret_or_env
 from .connect_api import router as connect_api_router
 app.include_router(connect_api_router)
+from .workflow_engine import router as workflow_runs_router
+app.include_router(workflow_runs_router)
