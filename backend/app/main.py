@@ -116,6 +116,10 @@ class WorkflowIn(BaseModel):
  name:str=Field(min_length=2,max_length=160)
  trigger_name:str=Field(min_length=2,max_length=160)
  action_plan:str=Field(min_length=2,max_length=10000)
+class TradingAnalysisIn(BaseModel):
+ symbol:str=Field(min_length=2,max_length=20,pattern=r"^[A-Za-z0-9._-]+$")
+ timeframe:str=Field(default="daily",max_length=40)
+ market_context:str=Field(min_length=20,max_length=12000)
 class BacktestIn(BaseModel):
  symbol:str=Field(min_length=2,max_length=20,pattern=r"^[A-Za-z0-9._-]+$")
  closes:list[float]=Field(min_length=30,max_length=5000)
@@ -276,3 +280,13 @@ def run_backtest(x:BacktestIn):
 @app.get("/api/v1/trading/backtests")
 def list_backtests():
  return rows("SELECT id,symbol,fast_window,slow_window,initial_cash,final_equity,return_pct,max_drawdown_pct,trade_count,created FROM backtests ORDER BY created DESC LIMIT 100")
+
+@app.post("/api/v1/trading/analysis")
+async def trading_analysis(x:TradingAnalysisIn):
+ prompt=("Provide an educational, risk-first market scenario analysis using ONLY the market information supplied below. "
+ "Do not invent live prices, news, indicators or events. Do not tell the user to buy, sell or use leverage. "
+ "Separate observed inputs from assumptions. Explain bullish, bearish and neutral scenarios, invalidation conditions, "
+ "missing data, and risk-management questions. State clearly that this is not personalized financial advice.\n"
+ f"Symbol: {x.symbol.upper()}\nTimeframe: {x.timeframe}\nUser-supplied market context:\n{x.market_context}")
+ result=await ask("research",prompt)
+ return {"symbol":x.symbol.upper(),"timeframe":x.timeframe,"analysis":result,"data_source":"user_supplied_context","disclaimer":"Educational scenario analysis only. Not a trading signal, personalized financial advice or a guarantee."}
