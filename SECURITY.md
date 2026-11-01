@@ -40,3 +40,15 @@ Never paste credentials into chat, commit them to Git, put them in frontend vari
 - In-memory login attempt tracking is process-local and resets when the process restarts. The proxy throttle is global for the current single-owner deployment, not a scalable multi-user rate-limiting design.
 - There is no multi-tenant isolation, billing, payment processing, MFA, password-reset flow or production-grade distributed job queue yet.
 - A green CI build is not a security audit and does not prove production readiness.
+
+
+## Payment integration safeguards
+
+- Card data is collected only on Paystack or OPay hosted checkout pages. AgentForge must never receive or store PAN, expiry or CVV.
+- Paystack webhook signatures are checked against the raw request body with HMAC-SHA512; successful events are verified again through the Paystack transaction API and compared against the stored amount, currency and reference.
+- OPay callbacks are checked using the provider's documented canonical HMAC-SHA3-512 signature, then cross-checked with OPay's cashier status API before marking a payment successful.
+- Provider checkout URLs are restricted to known HTTPS provider hostnames to prevent redirect substitution.
+- Billing is disabled by default. Keep `BILLING_LIVE_ENABLED=false` until sandbox tests, merchant approval and production review are complete.
+- Payment references are unique and success processing is idempotent.
+- Do not expose payment routes as a customer SaaS until multi-tenant accounts and tenant-scoped authorization are implemented. Current payment/subscription rows are associated with customer email only; entitlements are not enforced.
+- Paystack recurring billing requires a configured provider plan code. OPay is treated as manual-renewal only in this release; do not assume OPay recurring support.
