@@ -37,8 +37,11 @@ def conn():
  c.execute("""CREATE TABLE IF NOT EXISTS yt_drafts(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,script TEXT NOT NULL,topic TEXT NOT NULL,video_path TEXT,thumbnail_path TEXT,status TEXT NOT NULL,privacy TEXT NOT NULL,created TEXT NOT NULL,published_url TEXT,published_at TEXT,error TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_oauth_states(state TEXT PRIMARY KEY,created TEXT NOT NULL)""")
  columns={r["name"] for r in c.execute("PRAGMA table_info(yt_drafts)").fetchall()}
- for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT"),("telegram_daily_report_enabled","INTEGER NOT NULL DEFAULT 0"),("last_telegram_report_at","TEXT")):
+ for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT")):
   if name not in columns: c.execute(f"ALTER TABLE yt_drafts ADD COLUMN {name} {definition}")
+ settings_columns={r["name"] for r in c.execute("PRAGMA table_info(yt_settings)").fetchall()}
+ for name,definition in (("telegram_daily_report_enabled","INTEGER NOT NULL DEFAULT 0"),("last_telegram_report_at","TEXT")):
+  if name not in settings_columns: c.execute(f"ALTER TABLE yt_settings ADD COLUMN {name} {definition}")
  c.commit(); return c
 
 class Discover(BaseModel):
