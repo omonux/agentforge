@@ -213,16 +213,16 @@ def _srt_time(seconds:float):
  return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 def _captions(script:str):
- sentences=[x.strip() for x in re.split(r"(?<=[.!?])\\s+",script) if x.strip()]
+ sentences=[x.strip() for x in re.split(r"(?<=[.!?])\s+",script) if x.strip()]
  if not sentences: sentences=[script.strip()]
  total_words=sum(max(1,len(x.split())) for x in sentences)
  duration=max(8.0,total_words/2.35)
  cursor=0.0; parts=[]
  for index,sentence in enumerate(sentences):
   span=duration*max(1,len(sentence.split()))/total_words
-  parts.append(f"{index+1}\\n{_srt_time(cursor)} --> {_srt_time(cursor+span)}\\n{sentence}\\n")
+  parts.append(f"{index+1}\n{_srt_time(cursor)} --> {_srt_time(cursor+span)}\n{sentence}\n")
   cursor+=span
- return "\\n".join(parts)
+ return "\n".join(parts)
 
 @router.post("/drafts/{draft_id}/voice")
 async def generate_voice(draft_id:str):
