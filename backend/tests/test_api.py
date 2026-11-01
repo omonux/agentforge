@@ -158,3 +158,33 @@ def test_omonux_auto_engine_rejects_live_mode(tmp_path, monkeypatch):
         login(client, monkeypatch)
         response = client.put("/api/v1/trading/auto/config", json={"mode": "live"})
         assert response.status_code == 400
+
+def test_omonux_chart_scan_validates_upload_and_ai_configuration(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "chart.db")
+    monkeypatch.delenv("AI_BASE_URL", raising=False)
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("AI_MODEL", raising=False)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        bad_type = client.post(
+            "/api/v1/trading/chart-scan",
+            files={"chart": ("chart.txt", b"not an image", "text/plain")},
+        )
+        assert bad_type.status_code == 415
+
+        no_provider = client.post(
+            "/api/v1/trading/chart-scan",
+            files={"chart": ("chart.png", b"fake-png-bytes", "image/png")},
+        )
+        assert no_provider.status_code == 503
+
+
+def test_omonux_chart_scan_requires_authentication(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "chart-auth.db")
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/v1/trading/chart-scan",
+            files={"chart": ("chart.png", b"fake-png-bytes", "image/png")},
+        )
+        assert response.status_code == 401
+
