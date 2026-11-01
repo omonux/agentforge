@@ -48,7 +48,8 @@ Never paste credentials into chat, commit them to Git, put them in frontend vari
 - Paystack webhook signatures are checked against the raw request body with HMAC-SHA512; successful events are verified again through the Paystack transaction API and compared against the stored amount, currency and reference.
 - OPay callbacks are checked using the provider's documented canonical HMAC-SHA3-512 signature, then cross-checked with OPay's cashier status API before marking a payment successful.
 - Provider checkout URLs are restricted to known HTTPS provider hostnames to prevent redirect substitution.
-- Billing is disabled by default. Keep `BILLING_LIVE_ENABLED=false` until sandbox tests, merchant approval and production review are complete.
+- Checkout is disabled by default with `BILLING_ENABLED=false`. Enable it only for sandbox tests after test credentials are configured.
+- Keep `BILLING_LIVE_ENABLED=false` until sandbox tests, merchant approval and production review are complete; live Paystack keys and production OPay hosts are blocked unless this separate switch is explicitly enabled.
 - Payment references are unique and success processing is idempotent.
 - Do not expose payment routes as a customer SaaS until multi-tenant accounts and tenant-scoped authorization are implemented. Current payment/subscription rows are associated with customer email only; entitlements are not enforced.
 - Paystack recurring billing requires a configured provider plan code. OPay is treated as manual-renewal only in this release; do not assume OPay recurring support.
