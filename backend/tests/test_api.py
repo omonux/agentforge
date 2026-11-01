@@ -621,6 +621,7 @@ def test_connect_api_vault_is_encrypted_and_wires_provider_settings(tmp_path, mo
             "ai_model": "gpt-test-model",
             "telegram_bot_token": "123456:private-telegram-token",
             "telegram_chat_id": "987654321",
+            "replicate_input_json": '{"aspect_ratio":"9:16","duration":30}',
         }
         for name, value in saved_values.items():
             response = client.put("/api/v1/connect-api/secrets", json={"name": name, "value": value})
