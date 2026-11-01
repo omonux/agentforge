@@ -35,7 +35,7 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS backtests(id TEXT PRIMARY KEY,symbol TEXT,fast_window INTEGER,slow_window INTEGER,initial_cash REAL,final_equity REAL,return_pct REAL,max_drawdown_pct REAL,trade_count INTEGER,created TEXT,report TEXT)")
  yield
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
-app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"])
+app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"],allow_credentials=True)
 class Task(BaseModel):
  agent:str
  title:str=Field(min_length=2,max_length=120)
