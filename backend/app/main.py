@@ -40,13 +40,34 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS trading_safety_state(id INTEGER PRIMARY KEY CHECK(id=1),emergency_stopped INTEGER NOT NULL DEFAULT 0,reason TEXT,updated TEXT NOT NULL)")
   c.execute("INSERT OR IGNORE INTO trading_safety_state(id,updated) VALUES(1,?)",(stamp(),))
+ async def live_reconciliation_scheduler():
+  # Import lazily to avoid the main/router import cycle. Only recorded orders
+  # are queried; this worker never creates, modifies or cancels exchange orders.
+  await asyncio.sleep(20)
+  while True:
+   try:
+    from .omonux_live_ops import reconcile_orders, ensure_ops_tables
+    ensure_ops_tables()
+    with db() as conn:
+     pending=conn.execute("SELECT COUNT(*) AS n FROM live_orders WHERE status NOT IN ('FILLED','CANCELED','REJECTED','PARTIALLY_FILLED_FINAL','Filled','Cancelled','Rejected')").fetchone()["n"]
+    if pending:
+     await reconcile_orders()
+   except asyncio.CancelledError:
+    raise
+   except Exception:
+    # A temporary exchange/network failure must not crash the API process.
+    pass
+   await asyncio.sleep(max(30, int(os.getenv("LIVE_RECONCILE_INTERVAL_SECONDS", "60"))))
  scheduler=asyncio.create_task(auto_trade_scheduler())
+ live_scheduler=asyncio.create_task(live_reconciliation_scheduler())
  try:
   yield
  finally:
   scheduler.cancel()
-  try: await scheduler
-  except asyncio.CancelledError: pass
+  live_scheduler.cancel()
+  for task in (scheduler,live_scheduler):
+   try: await task
+   except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"],allow_credentials=True)
 class Task(BaseModel):
