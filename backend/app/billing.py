@@ -114,7 +114,7 @@ def _mark_payment(reference, provider, status, provider_id=None):
     with _db() as conn:
         row = conn.execute("SELECT * FROM billing_payments WHERE reference=? AND provider=?",
                            (reference, provider)).fetchone()
-        if not row or (row["status"] == "success" and status != "success"):
+        if not row or row["status"] == "success":
             return
         now = _now()
         conn.execute("""UPDATE billing_payments SET status=?,provider_transaction_id=COALESCE(?,provider_transaction_id),
