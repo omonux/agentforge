@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from .omonux_integrations import secret_or_env
+from .omonux_integrations import secret_or_env, read_secret, store_secret, send_telegram_message
 
 router=APIRouter(prefix="/api/v1/youtube",tags=["YouTube Automation"])
 DB=Path(os.getenv("DATABASE_PATH","./agentforge.db"))
@@ -27,7 +27,7 @@ def video_config():
          cfg("replicate_model","VIDEO_MODEL"),
          os.getenv("VIDEO_PROVIDER","replicate").lower())
 VIDEO_DIR=Path(os.getenv("YOUTUBE_STORAGE_DIR","./storage/youtube")).resolve()
-SCOPES="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+SCOPES="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/yt-analytics-monetary.readonly"
 
 def now(): return datetime.now(timezone.utc).isoformat()
 def conn():
@@ -35,6 +35,9 @@ def conn():
  c.execute("""CREATE TABLE IF NOT EXISTS yt_settings(id INTEGER PRIMARY KEY CHECK(id=1),access_token TEXT,refresh_token TEXT,expires_at TEXT,channel_title TEXT,channel_id TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_drafts(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,script TEXT NOT NULL,topic TEXT NOT NULL,video_path TEXT,thumbnail_path TEXT,status TEXT NOT NULL,privacy TEXT NOT NULL,created TEXT NOT NULL,published_url TEXT,published_at TEXT,error TEXT)""")
  c.execute("""CREATE TABLE IF NOT EXISTS yt_oauth_states(state TEXT PRIMARY KEY,created TEXT NOT NULL)""")
+  columns={r["name"] for r in c.execute("PRAGMA table_info(yt_drafts)").fetchall()}
+  for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT")):
+   if name not in columns: c.execute(f"ALTER TABLE yt_drafts ADD COLUMN {name} {definition}")
  c.commit(); return c
 
 class Discover(BaseModel):
@@ -53,15 +56,18 @@ def token_row():
  with conn() as c: return c.execute("SELECT * FROM yt_settings WHERE id=1").fetchone()
 async def access_token():
  row=token_row()
- if not row or not row["refresh_token"]: raise HTTPException(409,"Connect your YouTube channel first.")
- if row["access_token"] and row["expires_at"] and datetime.fromisoformat(row["expires_at"])>datetime.now(timezone.utc)+timedelta(seconds=60): return row["access_token"]
+ refresh_token=read_secret("youtube_refresh_token")
+ access_token_value=read_secret("youtube_access_token")
+ if not row or not refresh_token: raise HTTPException(409,"Connect your YouTube channel first.")
+ if access_token_value and row["expires_at"] and datetime.fromisoformat(row["expires_at"])>datetime.now(timezone.utc)+timedelta(seconds=60): return access_token_value
  client_id,client_secret,redirect_uri,_region=youtube_config()
  if not client_id or not client_secret: raise HTTPException(503,"Open Connect API and add the Google OAuth client ID and secret.")
  async with httpx.AsyncClient(timeout=30) as h:
-  r=await h.post("https://oauth2.googleapis.com/token",data={"client_id":client_id,"client_secret":client_secret,"refresh_token":row["refresh_token"],"grant_type":"refresh_token"})
+  r=await h.post("https://oauth2.googleapis.com/token",data={"client_id":client_id,"client_secret":client_secret,"refresh_token":refresh_token,"grant_type":"refresh_token"})
  if r.status_code>=400: raise HTTPException(502,"YouTube authorization expired. Reconnect the channel.")
  d=r.json(); expiry=(datetime.now(timezone.utc)+timedelta(seconds=int(d.get("expires_in",3600)))).isoformat()
- with conn() as c: c.execute("UPDATE yt_settings SET access_token=?,expires_at=? WHERE id=1",(d["access_token"],expiry))
+ store_secret("youtube_access_token",d["access_token"])
+ with conn() as c: c.execute("UPDATE yt_settings SET access_token=NULL,refresh_token=NULL,expires_at=? WHERE id=1",(expiry,))
  return d["access_token"]
 
 @router.get("/status")
@@ -69,7 +75,7 @@ def status():
  row=token_row()
  client_id,client_secret,_redirect,region=youtube_config()
  video_key,video_model,video_provider=video_config()
- return {"configured":bool(client_id and client_secret),"connected":bool(row and row["refresh_token"]),"channel":row["channel_title"] if row else None,"region":region,"video_generation_configured":bool(video_key and video_model),"video_provider":video_provider}
+ return {"configured":bool(client_id and client_secret),"connected":bool(row and read_secret("youtube_refresh_token")),"channel":row["channel_title"] if row else None,"region":region,"video_generation_configured":bool(video_key and video_model),"video_provider":video_provider}
 @router.get("/oauth/start")
 def oauth_start():
  client_id,client_secret,redirect_uri,_region=youtube_config()
@@ -99,10 +105,12 @@ async def oauth_callback(code:str="",state:str="",error:str=""):
  items=q.json().get("items",[])
  if not items: raise HTTPException(502,"No YouTube channel was found on this Google account.")
  channel=items[0]
- old=token_row(); refresh=d.get("refresh_token") or (old["refresh_token"] if old else None)
+ old=token_row(); refresh=d.get("refresh_token") or read_secret("youtube_refresh_token")
+ if not refresh: raise HTTPException(502,"Google did not issue a refresh token. Remove AgentForge access from your Google account and reconnect with consent.")
+ store_secret("youtube_access_token",token); store_secret("youtube_refresh_token",refresh)
  expires=(datetime.now(timezone.utc)+timedelta(seconds=int(d.get("expires_in",3600)))).isoformat()
  with conn() as c:
-  c.execute("INSERT OR REPLACE INTO yt_settings(id,access_token,refresh_token,expires_at,channel_title,channel_id) VALUES(1,?,?,?,?,?)",(token,refresh,expires,channel["snippet"]["title"],channel["id"]))
+  c.execute("INSERT OR REPLACE INTO yt_settings(id,access_token,refresh_token,expires_at,channel_title,channel_id) VALUES(1,NULL,NULL,?,?,?)",(expires,channel["snippet"]["title"],channel["id"]))
  return RedirectResponse("/?youtube=connected",status_code=303)
 
 @router.post("/trends")
@@ -133,6 +141,7 @@ async def create_draft(req:Draft):
  ident=str(uuid.uuid4()); created=now()
  with conn() as c:
   c.execute("INSERT INTO yt_drafts(id,title,description,script,topic,status,privacy,created) VALUES(?,?,?,?,?,'script_ready',?,?)",(ident,str(package["title"])[:100],str(package["description"])[:5000],str(package["script"])[:30000],req.topic,req.privacy,created))
+ await send_telegram_message("AgentForge: a new YouTube script draft is ready for review: "+str(package["title"])[:180])
  return {"id":ident,"title":package["title"],"description":package["description"],"script":package["script"],"status":"script_ready","message":"Script package created. A rendered video is still required before approval and upload."}
 
 @router.post("/drafts/{draft_id}/render")
