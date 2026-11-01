@@ -593,3 +593,46 @@ def test_logout_revokes_server_side_session(tmp_path, monkeypatch):
         # Simulate a copied cookie being replayed after logout.
         client.cookies.set("agentforge_session", session_token)
         assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_connect_api_vault_is_encrypted_and_wires_provider_settings(tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(main, "DB", tmp_path / "connect-api.db")
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("AI_BASE_URL", raising=False)
+    monkeypatch.delenv("AI_MODEL", raising=False)
+    with TestClient(main.app) as client:
+        assert client.get("/api/v1/connect-api").status_code == 401
+        login(client, monkeypatch)
+        listing = client.get("/api/v1/connect-api")
+        assert listing.status_code == 200
+        data = listing.json()
+        assert data["encryption_ready"] is True
+        service_ids = {item["id"] for item in data["services"]}
+        assert {"ai", "images", "video", "youtube", "telegram", "voice", "payments", "trading"} <= service_ids
+        saved_values = {
+            "ai_api_key": "private-ai-test-key",
+            "ai_base_url": "https://api.openai.com/v1",
+            "ai_model": "gpt-test-model",
+            "telegram_bot_token": "123456:private-telegram-token",
+            "telegram_chat_id": "987654321",
+        }
+        for name, value in saved_values.items():
+            response = client.put("/api/v1/connect-api/secrets", json={"name": name, "value": value})
+            assert response.status_code == 200
+            assert response.json()["value_returned"] is False
+        status = client.get("/api/v1/connect-api")
+        assert status.status_code == 200
+        assert status.json()["services"][0]["configured"] is True
+        assert "private-ai-test-key" not in status.text
+        assert client.get("/api/v1/ai/status").json()["configured"] is True
+        with sqlite3.connect(main.DB) as conn:
+            rows = conn.execute("SELECT name,ciphertext FROM integration_secrets").fetchall()
+        ciphertexts = {name: bytes(value) for name, value in rows}
+        assert b"private-ai-test-key" not in ciphertexts["ai_api_key"]
+        assert b"123456:private-telegram-token" not in ciphertexts["telegram_bot_token"]
+        removed = client.delete("/api/v1/connect-api/secrets/ai_api_key")
+        assert removed.status_code == 200
+        assert client.get("/api/v1/ai/status").json()["configured"] is False
+
