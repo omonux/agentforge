@@ -425,3 +425,33 @@ def test_live_ops_alerts_require_explicit_opt_in(tmp_path, monkeypatch):
         })
         assert response.status_code == 200
         assert response.json()["enabled"] is False
+
+
+def test_live_reconciliation_tables_initialize_and_worker_is_safe_without_orders(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "live-reconcile.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        from app.omonux_live_ops import ensure_ops_tables
+        ensure_ops_tables()
+        with main.db() as conn:
+            tables = {row["name"] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+        assert {"live_orders", "live_order_previews", "live_alert_outbox"} <= tables
+        response = client.post("/api/v1/trading/live-ops/orders/reconcile")
+        assert response.status_code == 200
+        assert response.json()["checked"] == 0
+
+
+def test_live_strategy_research_never_places_orders(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "live-research.db")
+    async def fake_candles(symbol, interval, limit):
+        return [{"close": float(100 + ((i % 17) - 8) * (1 if i % 34 < 17 else -1))}
+                for i in range(160)]
+    monkeypatch.setattr("app.omonux_live_ops.fetch_candles", fake_candles)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.post("/api/v1/trading/live-ops/research/ema?symbol=BTCUSDT&interval=1h&fast=5&slow=12&limit=160")
+        assert response.status_code == 200
+        assert response.json()["execution"] == "research_only_no_orders"
+        assert client.get("/api/v1/trading/live-ops/analytics").json()["orders_included"] == 0
