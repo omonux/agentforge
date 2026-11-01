@@ -51,6 +51,24 @@ def test_health_and_core_records(tmp_path, monkeypatch):
 
         assert client.get("/api/v1/analytics/summary").json()["leads_total"] == 1
 
+
+def test_workspace_overview_unifies_departments_without_exposing_secrets(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "overview.db")
+    monkeypatch.setenv("IMAGE_API_KEY", "private-test-key")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "private-client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "private-client-secret")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.get("/api/v1/workspace/overview")
+        assert response.status_code == 200
+        data = response.json()
+        ids = {item["id"] for item in data["departments"]}
+        assert {"agents", "crm", "support", "content", "workflows", "images", "youtube", "trading", "billing"} <= ids
+        assert data["security"]["live_trading_enabled"] is False
+        serialized = response.text
+        assert "private-test-key" not in serialized
+        assert "private-client-secret" not in serialized
+
 def test_invalid_stage_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB", tmp_path / "invalid.db")
     with TestClient(main.app) as client:
