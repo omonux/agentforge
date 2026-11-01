@@ -38,7 +38,6 @@ async def life(app):
   c.execute("INSERT OR IGNORE INTO auto_trade_settings(id,updated) VALUES(1,?)",(stamp(),))
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_positions(id TEXT PRIMARY KEY,symbol TEXT NOT NULL,side TEXT NOT NULL,quantity REAL NOT NULL,entry_price REAL NOT NULL,stop_price REAL NOT NULL,target_price REAL NOT NULL,opened TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
-  c.execute("CREATE TABLE IF NOT EXISTS telegram_outbox(id TEXT PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,message TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,created TEXT NOT NULL,sent_at TEXT)")
  scheduler=asyncio.create_task(auto_trade_scheduler())
  try:
   yield
@@ -462,20 +461,14 @@ def auto_settings():
  return row
 
 def auto_event(kind,symbol=None,details=None,pnl=None):
- event_id=str(uuid.uuid4()); created=stamp()
  with db() as c:
-  c.execute("INSERT INTO auto_trade_events VALUES(?,?,?,?,?,?)",(event_id,kind,symbol,details,pnl,created))
-  ready=c.execute("SELECT COUNT(*) FROM integration_secrets WHERE name IN ('telegram_bot_token','telegram_chat_id')").fetchone()[0]
-  if ready==2:
-   summary=f"OMONUX {kind}" + (f" · {symbol}" if symbol else "") + (f" · {details}" if details else "") + (f" · P&L {pnl:.2f}" if pnl is not None else "")
-   c.execute("INSERT OR IGNORE INTO telegram_outbox(id,event_id,message,status,attempts,created) VALUES(?,?,?,'pending',0,?)",(str(uuid.uuid4()),event_id,summary[:3500],created))
+  c.execute("INSERT INTO auto_trade_events VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),kind,symbol,details,pnl,stamp()))
 
 async def auto_trade_scheduler():
  while True:
   try:
    if auto_settings()["running"]:
     await auto_trade_run_once()
-   await deliver_pending_telegram_events()
   except Exception as exc:
    auto_event("SCHEDULER_ERROR",details=str(exc))
   await asyncio.sleep(60)
@@ -582,4 +575,3 @@ app.include_router(omonux_integrations_router)
 # Read-only exchange account checks are restricted to exchange testnets.
 from .omonux_exchange_testnet import router as omonux_exchange_router
 app.include_router(omonux_exchange_router)
-from .omonux_integrations import deliver_pending_telegram_events
