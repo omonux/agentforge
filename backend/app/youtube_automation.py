@@ -26,6 +26,14 @@ def video_config():
  return (cfg("replicate_api_token","VIDEO_API_KEY"),
          cfg("replicate_model","VIDEO_MODEL"),
          os.getenv("VIDEO_PROVIDER","replicate").lower())
+
+def video_input_config():
+ raw=cfg("replicate_input_json","VIDEO_INPUT_JSON",'{"aspect_ratio":"9:16","duration":30}')
+ try: data=json.loads(raw) if raw else {}
+ except ValueError: raise HTTPException(400,"Replicate video input JSON must be a valid JSON object.")
+ if not isinstance(data,dict): raise HTTPException(400,"Replicate video input JSON must be an object.")
+ data.pop("prompt",None)
+ return data
 VIDEO_DIR=Path(os.getenv("YOUTUBE_STORAGE_DIR","./storage/youtube")).resolve()
 SCOPES="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/yt-analytics-monetary.readonly"
 
@@ -375,7 +383,7 @@ async def render_draft(draft_id:str):
   async with httpx.AsyncClient(timeout=75) as h:
    response=await h.post("https://api.replicate.com/v1/models/"+video_model+"/predictions",
     headers={"Authorization":"Bearer "+video_key,"Prefer":"wait=60","Content-Type":"application/json"},
-    json={"input":{"prompt":row["script"]}})
+    json={"input":{**video_input_config(),"prompt":row["script"]}})
   if response.status_code>=400: raise HTTPException(502,"Video provider rejected the render request. Check model input schema and account limits.")
   prediction=response.json()
   if prediction.get("status")=="succeeded" and prediction.get("output"):
