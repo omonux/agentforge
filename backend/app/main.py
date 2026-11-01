@@ -569,3 +569,6 @@ async def auto_trade_run_once():
 # OMONUX legacy chart-image analysis, protected by the workspace auth middleware above.
 from .omonux_chart_analysis import router as omonux_chart_router
 app.include_router(omonux_chart_router)
+# Encrypted OMONUX exchange and Telegram integration settings.
+from .omonux_integrations import router as omonux_integrations_router
+app.include_router(omonux_integrations_router)
