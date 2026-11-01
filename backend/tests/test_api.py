@@ -517,3 +517,45 @@ def test_reconcile_unknown_binance_order_by_client_id(tmp_path, monkeypatch):
     assert saved["exchange_order_id"] == "987"
     assert saved["status"] == "FILLED"
     assert saved["executed_quantity"] == "0.001"
+
+def test_live_analytics_fifo_realized_pnl_and_open_inventory(tmp_path, monkeypatch):
+    import json
+    from app import omonux_live_ops as live_ops
+
+    monkeypatch.setattr(main, "DB", tmp_path / "fifo-analytics.db")
+    live_ops.ensure_ops_tables()
+    with main.db() as conn:
+        conn.execute(
+            """INSERT INTO live_orders(
+                id,preview_id,exchange_order_id,client_order_id,symbol,side,quantity,
+                executed_quantity,quote_quantity,status,response,created_at,exchange_name
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("buy-1", "preview-buy", "101", "client-buy", "BTCUSDT", "BUY",
+             "2", "2", "200", "FILLED",
+             json.dumps({"fills": [{"qty": "2", "price": "100", "commission": "1",
+                                    "commissionAsset": "USDT", "isBuyer": True, "time": 1000}]}),
+             "2026-01-01T00:00:01+00:00", "binance"),
+        )
+        conn.execute(
+            """INSERT INTO live_orders(
+                id,preview_id,exchange_order_id,client_order_id,symbol,side,quantity,
+                executed_quantity,quote_quantity,status,response,created_at,exchange_name
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("sell-1", "preview-sell", "102", "client-sell", "BTCUSDT", "SELL",
+             "1", "1", "120", "FILLED",
+             json.dumps({"fills": [{"qty": "1", "price": "120", "commission": "0.5",
+                                    "commissionAsset": "USDT", "isBuyer": False, "time": 2000}]}),
+             "2026-01-01T00:00:02+00:00", "binance"),
+        )
+
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.get("/api/v1/trading/live-ops/analytics")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["fills_included"] == 2
+        assert float(data["fifo_realized_gross_pnl_usdt"]) == 19.5
+        assert float(data["fifo_realized_net_pnl_usdt"]) == 19.0
+        assert data["open_inventory_by_symbol"]["BTCUSDT"]["quantity"] == "1"
+        assert float(data["open_inventory_fifo_cost_usdt"]) == 100.5
+
