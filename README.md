@@ -51,7 +51,7 @@ Active foundation, not production-ready. CRM leads, support tickets, content rec
 
 The API and SQLite data volume are kept behind the web proxy. For local non-Docker development, run the API on port 8000 and Vite on port 5173.
 
-Docker Compose is a development deployment convenience, not a production security certification. The API currently lacks user login and tenant isolation; keep it private until those are implemented and reviewed.
+Docker Compose is a development deployment convenience, not a production security certification. The owner login protects the private single-owner workspace, but multi-tenant isolation, production session revocation, durable job processing, monitoring and a full security review are not implemented. Keep the service private until its production hosting, persistent storage and secrets are configured and reviewed.
 
 ## Private workspace sign-in
 
