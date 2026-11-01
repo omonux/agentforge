@@ -344,3 +344,26 @@ def test_live_exchange_signatures_are_sha256_hex():
     from app.omonux_live_account import binance_live_signature, bybit_live_signature
     assert len(binance_live_signature("secret", {"timestamp": "123", "recvWindow": "5000"})) == 64
     assert len(bybit_live_signature("secret", "123", "key", "accountType=UNIFIED")) == 64
+
+
+def test_trading_emergency_stop_is_latched_until_explicit_reset(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "safety.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        stopped = client.post("/api/v1/trading/safety/emergency-stop", json={
+            "reason": "Operator detected unexpected behaviour"
+        })
+        assert stopped.status_code == 200
+        assert stopped.json()["emergency_stopped"] is True
+        assert stopped.json()["scope"] == "paper automatic trading engine only"
+        assert client.post("/api/v1/trading/auto/start").status_code == 423
+        assert client.post("/api/v1/trading/auto/run-once").status_code == 423
+        assert client.post("/api/v1/trading/safety/reset", json={
+            "confirmation": "wrong phrase"
+        }).status_code == 400
+        reset = client.post("/api/v1/trading/safety/reset", json={
+            "confirmation": "RESET TRADING SAFETY"
+        })
+        assert reset.status_code == 200
+        assert reset.json()["emergency_stopped"] is False
+        assert client.get("/api/v1/trading/auto/status").json()["running"] is False
