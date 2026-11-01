@@ -35,7 +35,8 @@
 - [ ] Finish end-to-end YouTube video rendering with model-specific input mapping, asynchronous polling, voice/audio and captions; validate actual MP4 output.
 - [ ] Add a manual recovery/reconciliation workflow for YouTube uploads marked upload_unknown; automatic retries are blocked to prevent duplicate videos.
 - [ ] Validate YouTube Analytics against a real connected channel; revenue requires eligible monetization and the monetary analytics OAuth scope.
-- [ ] Add scheduled daily Telegram analytics delivery; event notifications and a manual analytics-report action are available.
+- [x] Add opt-in scheduled daily Telegram analytics delivery, in addition to event notifications and manual reports.
+- [ ] Validate scheduled analytics delivery against a real connected YouTube channel and Telegram bot.
 - [ ] Expand the workflow runner with additional vetted connectors, retry policies and per-connector permission scopes; current queue supports only agent tasks, content drafts and Telegram messages.
 - [ ] Move all departments to a shared production database and validate migrations/backups before public launch.
 
