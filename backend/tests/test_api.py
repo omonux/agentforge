@@ -660,11 +660,17 @@ def test_workflow_runs_wait_for_approval_and_execute_allowlisted_actions(tmp_pat
         run_id = queued.json()["id"]
         assert queued.json()["status"] == "awaiting_approval"
         assert client.get("/api/v1/content").json() == []
-        completed = client.post("/api/v1/workflow-runs/" + run_id + "/approve",
-                                json={"confirmed": True})
-        assert completed.status_code == 200
-        assert completed.json()["status"] == "completed"
-        assert completed.json()["results"][0]["type"] == "content_draft"
+        approved = client.post("/api/v1/workflow-runs/" + run_id + "/approve",
+                               json={"confirmed": True})
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "queued"
+        import asyncio
+        from app.workflow_engine import run_pending_workflows
+        asyncio.run(run_pending_workflows())
+        history = client.get("/api/v1/workflow-runs").json()
+        completed = next(item for item in history if item["id"] == run_id)
+        assert completed["status"] == "completed"
+        assert completed["result"][0]["type"] == "content_draft"
         assert len(client.get("/api/v1/content").json()) == 1
 
 
