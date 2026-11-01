@@ -360,15 +360,20 @@ async def reconcile_orders():
                 status = item.get("orderStatus", order["status"])
                 executed = item.get("cumExecQty", order["executed_quantity"] or "0")
                 quote = item.get("cumExecValue", order["quote_quantity"] or "0")
+                resolved_order_id = item.get("orderId") or order["exchange_order_id"]
                 executions = await bybit_request("GET", "/v5/execution/list", key, secret,
-                                                  {"category": "spot", "symbol": order["symbol"], "orderId": order["exchange_order_id"]})
+                                                  {"category": "spot", "symbol": order["symbol"], "orderId": resolved_order_id})
                 detail = {"order": item, "fills": executions.get("list", [])}
             else:
                 key, secret = read_secret("binance_live_api_key"), read_secret("binance_live_api_secret")
                 if not key or not secret:
                     raise HTTPException(409, "Binance LIVE credentials missing.")
-                params = {"symbol": order["symbol"], "orderId": order["exchange_order_id"],
-                          "recvWindow": RECV, "timestamp": str(int(time.time() * 1000))}
+                params = {"symbol": order["symbol"], "recvWindow": RECV,
+                          "timestamp": str(int(time.time() * 1000))}
+                if order["exchange_order_id"]:
+                    params["orderId"] = order["exchange_order_id"]
+                else:
+                    params["origClientOrderId"] = order["client_order_id"]
                 params["signature"] = hmac.new(secret.encode(), urlencode(params).encode(), hashlib.sha256).hexdigest()
                 async with httpx.AsyncClient(timeout=12) as client:
                     response = await client.get("https://api.binance.com/api/v3/order", params=params, headers={"X-MBX-APIKEY": key})
@@ -377,7 +382,7 @@ async def reconcile_orders():
                 status = item.get("status", order["status"])
                 executed = item.get("executedQty", order["executed_quantity"] or "0")
                 quote = item.get("cummulativeQuoteQty", order["quote_quantity"] or "0")
-                trade_params = {"symbol": order["symbol"], "orderId": order["exchange_order_id"],
+                trade_params = {"symbol": order["symbol"], "orderId": item.get("orderId") or order["exchange_order_id"],
                                 "recvWindow": RECV, "timestamp": str(int(time.time() * 1000))}
                 trade_params["signature"] = hmac.new(secret.encode(), urlencode(trade_params).encode(), hashlib.sha256).hexdigest()
                 async with httpx.AsyncClient(timeout=12) as client:
