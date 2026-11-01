@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .omonux_integrations import ALLOWED_SECRET_NAMES, read_secret, store_secret, secret_or_env
+from .omonux_integrations import ALLOWED_SECRET_NAMES, read_secret, store_secret, secret_or_env, cipher
 from .main import db
 
 router = APIRouter(prefix="/api/v1/connect-api", tags=["Connect API"])
@@ -83,6 +83,13 @@ class SecretInput(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     value: str = Field(min_length=1, max_length=4096)
 
+def _encryption_ready() -> bool:
+    try:
+        cipher()
+        return True
+    except HTTPException:
+        return False
+
 def _present(name: str) -> bool:
     env = ENV_FALLBACKS.get(name, "")
     return bool(secret_or_env(name, env) if env else read_secret(name))
@@ -116,7 +123,7 @@ def list_connections():
         configured = all(f["configured"] for f in required) if required else any(f["configured"] for f in fields)
         groups.append({**service,"configured":configured,"fields":fields,
                        "check":checks.get(service["id"])})
-    return {"encryption_ready":bool(os.getenv("SECRET_ENCRYPTION_KEY","").strip()),
+    return {"encryption_ready":_encryption_ready(),
             "services":groups,
             "security":{"secrets_encrypted_at_rest":True,"secret_values_returned":False,
                         "live_trading_enabled":False}}
