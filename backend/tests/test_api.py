@@ -265,3 +265,38 @@ def test_omonux_exchange_testnet_signatures_are_deterministic():
     signature = bybit_signature("test-secret", "1700000000000", "test-key", "accountType=UNIFIED")
     assert signature == bybit_signature("test-secret", "1700000000000", "test-key", "accountType=UNIFIED")
     assert len(signature) == 64
+
+def test_omonux_daily_loss_gate_includes_unrealized_open_position_loss(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(main, "DB", tmp_path / "mark-to-market.db")
+
+    async def losing_market(symbol, interval="30m", limit=120):
+        return [
+            {"time": i, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}
+            for i in range(60)
+        ]
+
+    monkeypatch.setattr(main, "fetch_candles", losing_market)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        started = client.post("/api/v1/trading/auto/start")
+        assert started.status_code == 200
+        with main.db() as conn:
+            conn.execute(
+                "INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",
+                ("losing-position", "BTCUSDT", "BUY", 100, 200, 150, 300,
+                 datetime.now(timezone.utc).isoformat()),
+            )
+
+        cycle = client.post("/api/v1/trading/auto/run-once")
+        assert cycle.status_code == 409
+        assert "including open-position losses" in cycle.json()["detail"]
+        assert client.get("/api/v1/trading/auto/status").json()["running"] is False
+        events = client.get("/api/v1/trading/auto/events").json()
+        assert any(
+            event["event_type"] == "RISK_BLOCK"
+            and "unrealized P&L" in (event["details"] or "")
+            for event in events
+        )
+
