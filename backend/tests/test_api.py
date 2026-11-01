@@ -455,3 +455,65 @@ def test_live_strategy_research_never_places_orders(tmp_path, monkeypatch):
         assert response.status_code == 200
         assert response.json()["execution"] == "research_only_no_orders"
         assert client.get("/api/v1/trading/live-ops/analytics").json()["orders_included"] == 0
+
+
+def test_reconcile_unknown_binance_order_by_client_id(tmp_path, monkeypatch):
+    import asyncio
+    from app import omonux_live_ops as live_ops
+
+    monkeypatch.setattr(main, "DB", tmp_path / "unknown-order.db")
+    live_ops.ensure_ops_tables()
+    client_order_id = "AF" + "a" * 30
+    with main.db() as conn:
+        conn.execute(
+            """INSERT INTO live_orders(
+                id,preview_id,exchange_order_id,client_order_id,symbol,side,quantity,
+                executed_quantity,quote_quantity,status,response,created_at,exchange_name
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("local-1", "preview-1", None, client_order_id, "BTCUSDT", "BUY",
+             "0.001", "0", "0", "UNKNOWN", "{}", main.stamp(), "binance"),
+        )
+    monkeypatch.setattr(live_ops, "read_secret", lambda name: "test-key" if name.endswith("api_key") else "test-secret")
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            calls.append((url, dict(params or {})))
+            if url.endswith("/api/v3/order"):
+                return FakeResponse({
+                    "orderId": 987, "status": "FILLED",
+                    "executedQty": "0.001", "cummulativeQuoteQty": "65"
+                })
+            return FakeResponse([{
+                "commission": "0.01", "commissionAsset": "USDT"
+            }])
+
+    monkeypatch.setattr(live_ops.httpx, "AsyncClient", lambda *args, **kwargs: FakeClient())
+    result = asyncio.run(live_ops.reconcile_orders())
+
+    assert result["checked"] == 1
+    assert result["results"][0]["status"] == "FILLED"
+    assert calls[0][1]["origClientOrderId"] == client_order_id
+    assert calls[1][1]["orderId"] == 987
+    with main.db() as conn:
+        saved = conn.execute("SELECT exchange_order_id,status,executed_quantity FROM live_orders WHERE id='local-1'").fetchone()
+    assert saved["exchange_order_id"] == "987"
+    assert saved["status"] == "FILLED"
+    assert saved["executed_quantity"] == "0.001"
