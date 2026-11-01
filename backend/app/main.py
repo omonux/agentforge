@@ -79,18 +79,27 @@ class PaperTrade(BaseModel):
  side:str
  quantity:float=Field(gt=0,le=1000000)
  reference_price:float=Field(gt=0)
+def current_ai_config():
+ base=secret_or_env("ai_base_url","AI_BASE_URL").rstrip("/")
+ key=secret_or_env("ai_api_key","AI_API_KEY")
+ model=secret_or_env("ai_model","AI_MODEL")
+ return base,key,model
+
 async def ask(agent,prompt):
  if agent not in AGENTS: raise HTTPException(400,"Unknown agent type.")
- if not (BASE and KEY and MODEL): raise HTTPException(503,"AI provider is not configured. Set AI_BASE_URL, AI_API_KEY and AI_MODEL in backend/.env.")
+ base,key,model=current_ai_config()
+ if not (base and key and model): raise HTTPException(503,"AI provider is not configured. Open Connect API and add the AI API key, base URL and model.")
  name,policy=AGENTS[agent]
  try:
   async with httpx.AsyncClient(timeout=90) as client:
-   r=await client.post(BASE+"/chat/completions",headers={"Authorization":"Bearer "+KEY},json={"model":MODEL,"temperature":0.3,"messages":[{"role":"system","content":f"You are {name} in AgentForge. {policy} Be useful, honest and concise."},{"role":"user","content":prompt}]})
+   r=await client.post(base+"/chat/completions",headers={"Authorization":"Bearer "+key},json={"model":model,"temperature":0.3,"messages":[{"role":"system","content":f"You are {name} in AgentForge. {policy} Be useful, honest and concise."},{"role":"user","content":prompt}]})
    r.raise_for_status(); return r.json()["choices"][0]["message"]["content"]
  except httpx.HTTPStatusError as e: raise HTTPException(502,f"AI provider HTTP {e.response.status_code}.")
  except Exception: raise HTTPException(502,"AI provider request failed or returned an invalid response.")
 @app.get("/health")
-def health(): return {"status":"ok","ai_configured":bool(BASE and KEY and MODEL)}
+def health():
+ base,key,model=current_ai_config()
+ return {"status":"ok","ai_configured":bool(base and key and model)}
 
 # --- AI provider diagnostics (never return credentials) ---
 @app.get("/api/v1/workspace/overview")
@@ -107,10 +116,11 @@ def workspace_overview():
   with db() as c:
    row=c.execute("SELECT refresh_token FROM yt_settings WHERE id=1").fetchone()
    youtube_connected=bool(row and row["refresh_token"])
- image_ready=bool(os.getenv("IMAGE_API_KEY"))
- youtube_oauth_ready=bool(os.getenv("YOUTUBE_CLIENT_ID") and os.getenv("YOUTUBE_CLIENT_SECRET"))
+ image_ready=bool(secret_or_env("image_api_key","IMAGE_API_KEY"))
+ youtube_oauth_ready=bool(secret_or_env("youtube_client_id","YOUTUBE_CLIENT_ID") and secret_or_env("youtube_client_secret","YOUTUBE_CLIENT_SECRET"))
  billing_enabled=os.getenv("BILLING_ENABLED","false").lower()=="true"
- ai_ready=bool(BASE and KEY and MODEL)
+ ai_base,ai_key,ai_model=current_ai_config()
+ ai_ready=bool(ai_base and ai_key and ai_model)
  return {
   "counts": {
    "tasks":count("tasks"),"completed_tasks":count("tasks","status='completed'"),
@@ -136,17 +146,19 @@ def workspace_overview():
 
 @app.get("/api/v1/ai/status")
 def ai_status():
- configured=bool(BASE and KEY and MODEL)
- provider="OpenAI" if BASE.startswith("https://api.openai.com") else ("OpenAI-compatible" if BASE else "Not configured")
- return {"configured":configured,"provider":provider,"model":MODEL if configured else None,"base_url":BASE if configured else None,"key_present":bool(KEY)}
+ base,key,model=current_ai_config()
+ configured=bool(base and key and model)
+ provider="OpenAI" if base.startswith("https://api.openai.com") else ("OpenAI-compatible" if base else "Not configured")
+ return {"configured":configured,"provider":provider,"model":model if configured else None,"base_url":base if configured else None,"key_present":bool(key)}
 
 @app.post("/api/v1/ai/test")
 async def ai_test():
- if not (BASE and KEY and MODEL):
-  raise HTTPException(503,"OpenAI is not configured. Add AI_API_KEY in your hosting environment and set AI_BASE_URL and AI_MODEL.")
+ base,key,model=current_ai_config()
+ if not (base and key and model):
+  raise HTTPException(503,"AI is not configured. Open Connect API and add the AI API key, base URL and model.")
  try:
   answer=await ask("research","Reply with exactly: AgentForge AI connection successful.")
-  return {"connected":True,"provider":"OpenAI" if BASE.startswith("https://api.openai.com") else "OpenAI-compatible","model":MODEL,"message":answer}
+  return {"connected":True,"provider":"OpenAI" if base.startswith("https://api.openai.com") else "OpenAI-compatible","model":model,"message":answer}
  except HTTPException as e:
   if e.status_code==502: raise HTTPException(502,"The AI provider could not complete the test. Check the API key, model name and API billing/limits in your provider dashboard.")
   raise
@@ -760,3 +772,8 @@ app.include_router(image_ai_router)
 # YouTube OAuth, trend research, original video generation and approval-gated publishing.
 from .youtube_automation import router as youtube_automation_router
 app.include_router(youtube_automation_router)
+
+# Central encrypted credential vault and connection diagnostics.
+from .omonux_integrations import read_secret as read_integration_secret, secret_or_env
+from .connect_api import router as connect_api_router
+app.include_router(connect_api_router)
