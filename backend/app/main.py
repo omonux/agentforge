@@ -116,8 +116,8 @@ def workspace_overview():
   with db() as c:
    row=c.execute("SELECT id FROM yt_settings WHERE id=1").fetchone()
    youtube_connected=bool(row and read_integration_secret("youtube_refresh_token"))
- image_ready=bool(secret_or_env("image_api_key","IMAGE_API_KEY"))
- youtube_oauth_ready=bool(secret_or_env("youtube_client_id","YOUTUBE_CLIENT_ID") and secret_or_env("youtube_client_secret","YOUTUBE_CLIENT_SECRET"))
+ image_ready=bool(secret_or_env("image_api_key","IMAGE_API_KEY") and secret_or_env("image_base_url","IMAGE_BASE_URL","https://api.openai.com/v1") and secret_or_env("image_model","IMAGE_MODEL","gpt-image-1"))
+ youtube_oauth_ready=bool(secret_or_env("youtube_client_id","YOUTUBE_CLIENT_ID") and secret_or_env("youtube_client_secret","YOUTUBE_CLIENT_SECRET"))\n video_ready=bool(secret_or_env("replicate_api_token","VIDEO_API_KEY") and secret_or_env("replicate_model","VIDEO_MODEL"))
  billing_enabled=os.getenv("BILLING_ENABLED","false").lower()=="true"
  ai_base,ai_key,ai_model=current_ai_config()
  ai_ready=bool(ai_base and ai_key and ai_model)
@@ -128,16 +128,16 @@ def workspace_overview():
    "leads":count("leads"),"support_tickets":count("tickets"),
    "content_items":count("content_items"),"workflow_plans":count("workflows"),
    "image_assets":count("image_assets"),"youtube_drafts":count("yt_drafts"),
-   "paper_trades":count("paper_trades"),"watchlist_symbols":count("watchlist")
+   "paper_trades":count("paper_trades"),"watchlist_symbols":count("watchlist"),\n   "workflow_runs":count("workflow_runs"),"pending_workflow_approvals":count("workflow_runs","status='awaiting_approval'"),\n   "completed_workflow_runs":count("workflow_runs","status='completed'"),\n   "published_youtube_videos":count("yt_drafts","status='published'"),"videos_awaiting_approval":count("yt_drafts","status='ready_for_approval'")
   },
   "departments": [
    {"id":"agents","name":"AI Agents","page":"AI Agents","state":"ready" if ai_ready else "needs_setup","detail":"AI provider configured" if ai_ready else "Configure and test the AI provider"},
    {"id":"crm","name":"Sales Pipeline","page":"Sales Pipeline","state":"ready","detail":f"{count('leads')} saved leads"},
    {"id":"support","name":"Customer Support","page":"Customer Support","state":"ready","detail":f"{count('tickets')} saved tickets"},
    {"id":"content","name":"Content Studio","page":"Content Studio","state":"ready","detail":f"{count('content_items')} content records; draft and review"},
-   {"id":"workflows","name":"Automations","page":"Automations","state":"limited","detail":"Workflow plans are saved; general execution connectors are not enabled"},
+   {"id":"workflows","name":"Automations","page":"Automations","state":"limited","detail":"Approval-gated runs support agent tasks, content drafts and Telegram messages"},
    {"id":"images","name":"Image AI Studio","page":"Image AI Studio","state":"ready" if image_ready else "needs_setup","detail":"Image provider key configured" if image_ready else "Configure IMAGE_API_KEY"},
-   {"id":"youtube","name":"YouTube Automation","page":"YouTube Automation","state":"ready" if youtube_connected else "needs_setup","detail":"Channel connected" if youtube_connected else ("Google OAuth configured; connect a channel" if youtube_oauth_ready else "Configure Google OAuth and connect a channel")},
+   {"id":"youtube","name":"YouTube Automation","page":"YouTube Automation","state":"ready" if youtube_connected and video_ready else ("limited" if youtube_connected else "needs_setup"),"detail":"Channel and video provider connected" if youtube_connected and video_ready else ("Channel connected; configure video generation" if youtube_connected else ("Google OAuth configured; connect a channel" if youtube_oauth_ready else "Configure Google OAuth and connect a channel"))},
    {"id":"trading","name":"Omonux Trading","page":"Omonux Trading","state":"limited","detail":"Market research and paper trading; live execution remains separately guarded"},
    {"id":"billing","name":"Billing","page":"Billing","state":"ready" if billing_enabled else "disabled","detail":"Billing enabled by environment" if billing_enabled else "Billing is disabled by default"}
   ],
