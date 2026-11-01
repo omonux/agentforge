@@ -321,10 +321,17 @@ async def place_binance_order(request: PlaceRequest):
         uncertain = exc.response.status_code >= 500
         with db() as conn:
             conn.execute("UPDATE live_order_previews SET state=? WHERE id=? AND state='submitting'", ("unknown" if uncertain else "exchange_error", request.preview_id))
+            if uncertain:
+                conn.execute("""INSERT OR IGNORE INTO live_orders(id,preview_id,exchange_order_id,client_order_id,symbol,side,quantity,executed_quantity,quote_quantity,status,response,created_at)
+                    VALUES(?,?,NULL,?,?,?,?,?,?,?,'{}',?)""",
+                    (str(uuid.uuid4()), request.preview_id, client_order_id, preview["symbol"], preview["side"], str(quantity), "0", "0", "UNKNOWN", stamp()))
         raise HTTPException(502, "Binance returned an uncertain server error. Check exchange order history before retrying; the system will not resubmit this preview." if uncertain else "Binance rejected the order. Review the exchange response and create a fresh preview if appropriate.")
     except httpx.RequestError:
         with db() as conn:
             conn.execute("UPDATE live_order_previews SET state='unknown' WHERE id=? AND state='submitting'", (request.preview_id,))
+            conn.execute("""INSERT OR IGNORE INTO live_orders(id,preview_id,exchange_order_id,client_order_id,symbol,side,quantity,executed_quantity,quote_quantity,status,response,created_at)
+                VALUES(?,?,NULL,?,?,?,?,?,?,?,'{}',?)""",
+                (str(uuid.uuid4()), request.preview_id, client_order_id, preview["symbol"], preview["side"], str(quantity), "0", "0", "UNKNOWN", stamp()))
         raise HTTPException(502, "Order result is unknown due to a network error. Check Binance order history before doing anything else; do not retry this preview.")
     executed = str(data.get("executedQty", "0"))
     quote = str(data.get("cummulativeQuoteQty", "0"))
