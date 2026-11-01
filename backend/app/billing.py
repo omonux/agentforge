@@ -166,6 +166,7 @@ def billing_status():
         "opay_country": os.getenv("OPAY_COUNTRY", "NG"),
         "opay_currency": os.getenv("OPAY_CURRENCY", "NGN"),
         "prices_configured": all(_price(plan) for plan in PLAN_KEYS),
+        "checkout_enabled": os.getenv("BILLING_ENABLED", "false").lower() == "true",
         "live_payments_enabled": os.getenv("BILLING_LIVE_ENABLED", "false").lower() == "true",
         "customer_entitlements_enforced": False,
     }
@@ -212,8 +213,8 @@ async def create_checkout(data: CheckoutInput):
     init_billing_db()
     if not _valid_email(data.email):
         raise HTTPException(400, "Enter a valid customer email address.")
-    if os.getenv("BILLING_LIVE_ENABLED", "false").lower() != "true":
-        raise HTTPException(503, "Billing is disabled until merchant setup and sandbox testing are complete.")
+    if os.getenv("BILLING_ENABLED", "false").lower() != "true":
+        raise HTTPException(503, "Billing checkout is disabled until sandbox testing is enabled.")
     amount = _price(data.plan)
     if not amount:
         raise HTTPException(503, "This plan has no configured NGN price.")
@@ -228,6 +229,8 @@ async def create_checkout(data: CheckoutInput):
             secret = os.getenv("PAYSTACK_SECRET_KEY", "")
             if not secret:
                 raise HTTPException(503, "Paystack secret key is not configured.")
+            if secret.startswith("sk_live_") and os.getenv("BILLING_LIVE_ENABLED", "false").lower() != "true":
+                raise HTTPException(503, "Live Paystack keys are blocked until live billing is explicitly enabled.")
             body = {
                 "email": email, "amount": str(amount), "currency": "NGN",
                 "reference": reference, "callback_url": base_url + "/billing/return",
@@ -257,6 +260,8 @@ async def create_checkout(data: CheckoutInput):
             if country != "NG" or currency != "NGN":
                 raise HTTPException(503, "OPay checkout is configured for Nigeria NGN only.")
             api_base = os.getenv("OPAY_API_BASE_URL", "https://sandboxapi.opaycheckout.com").rstrip("/")
+            if urlparse(api_base).hostname in ("api.opaycheckout.com", "liveapi.opaycheckout.com") and os.getenv("BILLING_LIVE_ENABLED", "false").lower() != "true":
+                raise HTTPException(503, "Live OPay endpoint is blocked until live billing is explicitly enabled.")
             body = {
                 "country": country, "reference": reference,
                 "amount": {"total": amount, "currency": currency},
