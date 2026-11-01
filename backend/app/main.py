@@ -34,6 +34,10 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS workflows(id TEXT PRIMARY KEY,name TEXT NOT NULL,trigger_name TEXT NOT NULL,action_plan TEXT NOT NULL,status TEXT NOT NULL,created TEXT,updated TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS watchlist(id TEXT PRIMARY KEY,symbol TEXT NOT NULL UNIQUE,note TEXT,created TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS backtests(id TEXT PRIMARY KEY,symbol TEXT,fast_window INTEGER,slow_window INTEGER,initial_cash REAL,final_equity REAL,return_pct REAL,max_drawdown_pct REAL,trade_count INTEGER,created TEXT,report TEXT)")
+  c.execute("CREATE TABLE IF NOT EXISTS auto_trade_settings(id INTEGER PRIMARY KEY CHECK(id=1),running INTEGER NOT NULL DEFAULT 0,mode TEXT NOT NULL DEFAULT 'paper',risk_percent REAL NOT NULL DEFAULT 1,min_confidence INTEGER NOT NULL DEFAULT 60,max_open_positions INTEGER NOT NULL DEFAULT 3,max_daily_loss_percent REAL NOT NULL DEFAULT 5,cooldown_minutes INTEGER NOT NULL DEFAULT 15,max_trades_per_day INTEGER NOT NULL DEFAULT 10,max_notional_percent REAL NOT NULL DEFAULT 25,updated TEXT)")
+  c.execute("INSERT OR IGNORE INTO auto_trade_settings(id,updated) VALUES(1,?)",(stamp(),))
+  c.execute("CREATE TABLE IF NOT EXISTS auto_trade_positions(id TEXT PRIMARY KEY,symbol TEXT NOT NULL,side TEXT NOT NULL,quantity REAL NOT NULL,entry_price REAL NOT NULL,stop_price REAL NOT NULL,target_price REAL NOT NULL,opened TEXT NOT NULL)")
+  c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
  yield
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"],allow_credentials=True)
@@ -430,3 +434,118 @@ async def require_private_workspace(request:Request,call_next):
   if not cookie or not header or not hmac.compare_digest(cookie,header):
    return JSONResponse(status_code=403,content={"detail":"Security token missing or invalid. Refresh the page and try again."})
  return await call_next(request)
+
+
+# --- OMONUX automatic paper-trading engine: persistent settings, risk gates and audit ---
+class AutoTradeConfig(BaseModel):
+ mode:str="paper"
+ risk_percent:float=Field(default=1,ge=0.1,le=5)
+ min_confidence:int=Field(default=60,ge=1,le=100)
+ max_open_positions:int=Field(default=3,ge=1,le=20)
+ max_daily_loss_percent:float=Field(default=5,gt=0,le=100)
+ cooldown_minutes:int=Field(default=15,ge=0,le=1440)
+ max_trades_per_day:int=Field(default=10,ge=1,le=100)
+ max_notional_percent:float=Field(default=25,gt=0,le=100)
+
+def auto_settings():
+ row=one("SELECT * FROM auto_trade_settings WHERE id=1")
+ if not row:
+  with db() as c: c.execute("INSERT OR IGNORE INTO auto_trade_settings(id,updated) VALUES(1,?)",(stamp(),))
+  row=one("SELECT * FROM auto_trade_settings WHERE id=1")
+ return row
+
+def auto_event(kind,symbol=None,details=None,pnl=None):
+ with db() as c:
+  c.execute("INSERT INTO auto_trade_events VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),kind,symbol,details,pnl,stamp()))
+
+@app.get("/api/v1/trading/auto/status")
+def auto_trade_status():
+ settings=auto_settings()
+ return {"running":bool(settings["running"]),"settings":{k:settings[k] for k in ("mode","risk_percent","min_confidence","max_open_positions","max_daily_loss_percent","cooldown_minutes","max_trades_per_day","max_notional_percent")},"open_positions":rows("SELECT * FROM auto_trade_positions ORDER BY opened DESC"),"mode_notice":"Paper trading only. No exchange orders are supported by this engine."}
+
+@app.put("/api/v1/trading/auto/config")
+def auto_trade_config(x:AutoTradeConfig):
+ if x.mode!="paper":
+  raise HTTPException(400,"Only paper mode is available. Live execution is not implemented.")
+ with db() as c:
+  c.execute("""UPDATE auto_trade_settings SET mode=?,risk_percent=?,min_confidence=?,max_open_positions=?,max_daily_loss_percent=?,cooldown_minutes=?,max_trades_per_day=?,max_notional_percent=?,updated=? WHERE id=1""",
+   (x.mode,x.risk_percent,x.min_confidence,x.max_open_positions,x.max_daily_loss_percent,x.cooldown_minutes,x.max_trades_per_day,x.max_notional_percent,stamp()))
+ return auto_trade_status()
+
+@app.post("/api/v1/trading/auto/start")
+def auto_trade_start():
+ with db() as c: c.execute("UPDATE auto_trade_settings SET running=1,updated=? WHERE id=1",(stamp(),))
+ auto_event("ENGINE_STARTED",details="Paper trading engine started")
+ return auto_trade_status()
+
+@app.post("/api/v1/trading/auto/stop")
+def auto_trade_stop():
+ with db() as c: c.execute("UPDATE auto_trade_settings SET running=0,updated=? WHERE id=1",(stamp(),))
+ auto_event("ENGINE_STOPPED",details="Paper trading engine stopped")
+ return auto_trade_status()
+
+@app.get("/api/v1/trading/auto/events")
+def auto_trade_events():
+ return rows("SELECT * FROM auto_trade_events ORDER BY created DESC LIMIT 300")
+
+@app.post("/api/v1/trading/auto/run-once")
+async def auto_trade_run_once():
+ settings=auto_settings()
+ if not settings["running"]:
+  raise HTTPException(409,"Start the paper trading engine before running a cycle.")
+ today=datetime.now(timezone.utc).date().isoformat()
+ day_events=rows("SELECT * FROM auto_trade_events WHERE created LIKE ?",(today+"%",))
+ entries_today=sum(1 for e in day_events if e["event_type"]=="PAPER_ENTRY")
+ daily_pnl=sum(float(e["pnl"] or 0) for e in day_events if e["event_type"]=="PAPER_EXIT")
+ equity=10000.0
+ if daily_pnl <= -(equity*settings["max_daily_loss_percent"]/100):
+  auto_event("RISK_BLOCK",details="Maximum daily loss limit reached")
+  raise HTTPException(409,"Daily loss limit reached. Engine remains stopped until manually restarted.")
+ actions=[]
+ # Manage existing positions first using latest closed candle prices.
+ open_positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened")
+ for pos in open_positions:
+  try:
+   cs=await fetch_candles(pos["symbol"],"30m",60)
+   price=float(cs[-1]["close"])
+   exit_reason="STOP_LOSS" if price<=pos["stop_price"] else ("TAKE_PROFIT" if price>=pos["target_price"] else None)
+   if exit_reason:
+    pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])
+    with db() as c: c.execute("DELETE FROM auto_trade_positions WHERE id=?",(pos["id"],))
+    auto_event("PAPER_EXIT",pos["symbol"],exit_reason,pnl)
+    actions.append({"symbol":pos["symbol"],"action":"CLOSE","reason":exit_reason,"price":price,"pnl":round(pnl,2)})
+  except (ValueError,httpx.HTTPError,IndexError) as e:
+   auto_event("CYCLE_ERROR",pos["symbol"],str(e))
+ open_positions=rows("SELECT * FROM auto_trade_positions")
+ if len(open_positions)>=settings["max_open_positions"]:
+  auto_event("RISK_BLOCK",details="Maximum open positions reached")
+  return {"actions":actions,"blocked":"Maximum open positions reached","open_positions":len(open_positions)}
+ if entries_today>=settings["max_trades_per_day"]:
+  auto_event("RISK_BLOCK",details="Maximum trades per day reached")
+  return {"actions":actions,"blocked":"Maximum trades per day reached"}
+ last_exit=one("SELECT created FROM auto_trade_events WHERE event_type='PAPER_EXIT' ORDER BY created DESC LIMIT 1")
+ if last_exit and settings["cooldown_minutes"]>0:
+  elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(last_exit["created"])).total_seconds()/60
+  if elapsed<settings["cooldown_minutes"]:
+   return {"actions":actions,"blocked":"Cooldown active","cooldown_remaining_minutes":round(settings["cooldown_minutes"]-elapsed,1)}
+ for symbol in ("BTCUSDT","ETHUSDT","SOLUSDT"):
+  if len(open_positions)>=settings["max_open_positions"] or entries_today>=settings["max_trades_per_day"]: break
+  if any(p["symbol"]==symbol for p in open_positions): continue
+  try:
+   cs=await fetch_candles(symbol,"30m",120)
+   signal=build_signal(symbol,cs)
+   if signal["side"]!="BUY" or signal["confidence"]<settings["min_confidence"]: continue
+   price=float(signal["price"]); stop=float(signal["risk_levels"]["stop_reference"]); target=float(signal["risk_levels"]["target_reference"])
+   risk_cash=equity*settings["risk_percent"]/100
+   quantity=min(risk_cash/max(price-stop,1e-12),(equity*settings["max_notional_percent"]/100)/price)
+   if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or stop>=price or target<=price: continue
+   ident=str(uuid.uuid4())
+   with db() as c:
+    c.execute("INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",(ident,symbol,"BUY",quantity,price,stop,target,stamp()))
+   auto_event("PAPER_ENTRY",symbol,f"confidence={signal['confidence']}; qty={quantity:.8f}; stop={stop}; target={target}")
+   actions.append({"symbol":symbol,"action":"OPEN_PAPER","quantity":round(quantity,8),"entry":price,"stop":stop,"target":target,"confidence":signal["confidence"]})
+   open_positions.append({"symbol":symbol}); entries_today+=1
+  except (ValueError,httpx.HTTPError,IndexError) as e:
+   auto_event("CYCLE_ERROR",symbol,str(e))
+ with db() as c: c.execute("UPDATE auto_trade_settings SET updated=? WHERE id=1",(stamp(),))
+ return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
