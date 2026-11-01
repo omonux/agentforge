@@ -648,3 +648,7 @@ app.include_router(omonux_live_account_router)
 # Guarded Binance Spot LIVE order preview and individually confirmed execution.
 from .omonux_live_execution import router as omonux_live_execution_router
 app.include_router(omonux_live_execution_router)
+
+# OMONUX Bybit execution, reconciliation, analytics, strategy research and Telegram alerts.
+from .omonux_live_ops import router as omonux_live_ops_router
+app.include_router(omonux_live_ops_router)
