@@ -125,7 +125,7 @@ def live_trading_status():
         "bybit_enabled": os.getenv("BYBIT_LIVE_TRADING_ENABLED", "").lower() == "true",
         "emergency_stopped": bool(state["emergency_stopped"]) if state else True,
         "reason": state["reason"] if state else "Safety state not initialized",
-        "scope": "Manual, individually confirmed Binance Spot market orders only",
+        "scope": "Manual, individually confirmed Binance Spot price-protected LIMIT IOC orders only",
         "automatic_orders": False,
         "default_limits_usdt": {
             "per_order": os.getenv("LIVE_MAX_ORDER_NOTIONAL_USDT", "25"),
