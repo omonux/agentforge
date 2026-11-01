@@ -21,7 +21,7 @@ export default function WorkflowRuns({ onNotice }: { onNotice: (message: string)
       setWorkflows(wd); setRuns(rd);
     } catch(e) { setError(e instanceof Error?e.message:"Could not load workflow runs."); }
   },[]);
-  useEffect(()=>{void load()},[load]);
+  useEffect(()=>{void load();const timer=window.setInterval(()=>{void load()},4000);return()=>window.clearInterval(timer)},[load]);
 
   async function start(workflow:Workflow){
     setBusy("start:"+workflow.id);setError("");
@@ -38,7 +38,7 @@ export default function WorkflowRuns({ onNotice }: { onNotice: (message: string)
     try{
       const response=await apiFetch(API+"/api/v1/workflow-runs/"+run.id+(approve?"/approve":"/reject"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmed:true})});
       const data=await response.json();if(!response.ok)throw new Error(data.detail||"Workflow action failed.");
-      onNotice(approve?"Approved workflow finished with status: "+data.status:"Workflow run rejected.");await load();
+      onNotice(approve?"Workflow approved and queued for execution.":"Workflow run rejected.");await load();
     }catch(e){setError(e instanceof Error?e.message:"Workflow action failed.");await load()}
     finally{setBusy("")}
   }
