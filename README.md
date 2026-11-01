@@ -1,21 +1,36 @@
 # AgentForge by Omonux
-An AI workforce workspace for small businesses.
 
-## Modules
-- Customer support: policy-grounded draft replies and escalation.
-- Sales: prospect qualification and outreach drafts.
-- Content Studio: original scripts, hooks and captions.
-- Automation: reviewable workflow plans.
-- Research: source-aware reports.
-- Omonux Trading: paper journal, position accounting, watchlists and an SMA backtester using user-supplied historical closes; live trading disabled.
+AgentForge is a private, single-owner AI operations workspace. OMONUX is its trading department.
 
-## Structure
-- `apps/web`: React + TypeScript + Vite dashboard.
-- `backend`: FastAPI API, SQLite development persistence and configurable chat-completion provider.
-- `index.html`: original landing page retained during migration.
+## Product areas
+
+- **AI workforce:** support, sales, content, workflow-planning and research agents backed by a configured OpenAI-compatible provider.
+- **Business workspace:** persistent CRM leads, support tickets, content drafts and reviewable workflow plans.
+- **OMONUX Trading:** Binance public market candles and indicators, paper trading, automatic paper strategy controls, chart-image analysis, encrypted exchange integrations, read-only account checks, guarded manual Spot execution, order reconciliation, FIFO analytics, EMA research and opt-in Telegram alerts.
+- **Security:** owner sign-in, HttpOnly session cookie, CSRF protection, login throttling and encrypted integration secrets.
+
+## Current release scope and limitations
+
+This is a **private single-owner release foundation**, not a multi-customer SaaS product. It is not a finished unattended automation platform.
+
+- Workflow records are plans; they do not execute arbitrary external actions.
+- Content Studio creates scripts and drafts. Automated trend discovery, video rendering/voice production and YouTube publishing/monetization reporting are not implemented.
+- Telegram alerts are limited to configured trading events and explicit tests; they do not report YouTube revenue or subscriber growth.
+- Paper trading is simulated. The manual live Binance/Bybit Spot order endpoints are separate, feature-flagged OFF by default, and require preview plus explicit confirmation. Do not enable them for a public launch without an independent security and trading-risk review.
+- Trading analytics cover locally recorded fills. They are not a complete exchange-account statement, tax report or independently reconciled portfolio.
+- The original OMONUX repository is kept separate and is not modified by this integration.
+
+## Repository structure
+
+- `apps/web`: React, TypeScript and Vite dashboard.
+- `backend`: FastAPI API, SQLite persistence and AI provider integration.
+- `deploy`: Nginx and Supervisor configuration.
+- `Dockerfile` and `render.yaml`: container build and Render Blueprint.
 
 ## Run locally
+
 Backend:
+
 ```bash
 cd backend
 python -m venv .venv
@@ -25,53 +40,55 @@ pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
+
 Frontend:
+
 ```bash
 cd apps/web
 npm install
 npm run dev
 ```
-Set `AI_BASE_URL`, `AI_API_KEY` and `AI_MODEL` in backend/.env for real model-backed tasks. Never commit credentials.
 
-## Safety and truth in product
-A task is complete only after a successful provider response. Missing provider configuration is reported as an error, not replaced with fake output. External messaging, publishing, payments and trading require separate integrations and explicit approvals. Omonux Trading is paper-only and does not place live orders or promise returns.
+For the full container:
 
-## Status
-Active foundation, not production-ready. CRM leads, support tickets, content records, workflow plans, paper portfolio accounting and strategy backtests now have persistent API routes and dashboard screens. CI runs backend tests and the frontend production build. The private single-owner authentication layer now protects application APIs with an HttpOnly signed session cookie, PBKDF2 password verification, CSRF tokens, login throttling and a fail-closed configuration check. Multi-tenant accounts, PostgreSQL, durable queues, file ingestion, real social/CRM connectors, market-data licensing, billing, monitoring and a full production security review remain future work. This is a private single-owner deployment foundation, not a multi-customer SaaS release.
+```bash
+docker compose up --build
+```
 
-## Run the full stack with Docker
+The local development setup is not a production security certification.
 
-1. Copy backend/.env.example to backend/.env.
-2. Add your AI provider key and model to backend/.env (keep this file private).
-3. From the repository root run:
+## Required private configuration
 
-    docker compose up --build
+Set secrets only in the hosting provider's encrypted environment-variable settings. Never commit them or paste them into chat.
 
-4. Open http://localhost:8080.
+- `ADMIN_PASSWORD`: unique password, at least 14 characters.
+- `ADMIN_PASSWORD_SALT`: random salt.
+- `SESSION_SECRET`: unique high-entropy secret.
+- `COOKIE_SECURE=true` on HTTPS production.
+- `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL`: provider configuration.
+- `SECRET_ENCRYPTION_KEY`: Fernet key required to encrypt stored exchange and Telegram credentials. Back it up securely; losing it makes saved credentials unreadable.
+- Telegram bot token and chat ID: enter through the authenticated integration screen, not source code.
 
-The API and SQLite data volume are kept behind the web proxy. For local non-Docker development, run the API on port 8000 and Vite on port 5173.
-
-Docker Compose is a development deployment convenience, not a production security certification. The owner login protects the private single-owner workspace, but multi-tenant isolation, production session revocation, durable job processing, monitoring and a full security review are not implemented. Keep the service private until its production hosting, persistent storage and secrets are configured and reviewed.
-
-## Private workspace sign-in
-
-AgentForge is configured as a **single-owner private workspace**. All application API routes require a valid owner session, except the health check and sign-in endpoints. Browser writes require a CSRF token. Password verification uses PBKDF2-HMAC-SHA256; the session cookie is HttpOnly, SameSite=Strict and expires after eight hours. Five failed sign-in attempts from one IP are temporarily throttled.
-
-Before starting the app, set these values in `backend/.env` (never commit that file):
-
-- `SESSION_SECRET`: a unique random secret; generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-- `ADMIN_PASSWORD`: a unique password of at least 14 characters.
-- `ADMIN_PASSWORD_SALT`: a random salt; generate with `python -c "import secrets; print(secrets.token_hex(24))"`.
-- `COOKIE_SECURE=false` only for local HTTP development. Set `COOKIE_SECURE=true` on Render or any HTTPS deployment.
-
-The sign-in username is `owner`. Do not use a password from another service. If any authentication setting is missing or still contains a sample placeholder, private API routes fail closed.
-
-For Render, add the four settings above as private environment variables in the service dashboard before deploying. Do not paste passwords or secret values into GitHub, source files, or public issue trackers. Use a strong, unique owner password and keep it in a password manager.
+Keep `LIVE_TRADING_ENABLED=false` and `BYBIT_LIVE_TRADING_ENABLED=false` for launch. Keep exchange API withdrawal permissions disabled. Do not store live credentials until you have completed a separate security review.
 
 ## Render deployment
 
-The production container builds the React frontend and runs it with the FastAPI backend behind one same-origin Nginx proxy. This avoids cross-origin cookie/CSRF issues and keeps the API behind the public frontend. SQLite is configured to write to `/data/agentforge.db`, which is backed by the Render persistent disk declared in `render.yaml`.
+The Blueprint provisions a paid Starter web service and a 1 GB persistent disk mounted at `/data`. SQLite uses `/data/agentforge.db`; the service is single-instance. Review current pricing and regional availability in Render before provisioning.
 
-To deploy, connect this repository to Render as a Blueprint and select the `rebuild/agentforge-platform` branch. Render will ask for the two private values marked `sync: false`: `ADMIN_PASSWORD` (use a unique password of at least 14 characters) and `AI_API_KEY` (your provider key). The session secret and password salt are generated by Render. Never put these values in GitHub or chat.
+The Blueprint currently targets `main`. **Do not deploy until the required pull requests have been merged to main and the main-branch CI is green.** PR #5 is currently based on the OpenAI integration branch, so merge the dependency chain in order and verify the resulting main branch before creating the Render service. Do not deploy a stacked feature branch by guessing its runtime state.
 
-**Cost and availability:** this configuration uses a paid Starter web service and a 1 GB persistent disk. A disk-backed service is single-instance and redeploys can cause a brief interruption. Review the current Render price shown in your dashboard before creating the service. The service is not created automatically by committing this file.
+After the code is merged:
+
+1. Connect `omonux/agentforge` to Render as a Blueprint and inspect the planned resources.
+2. Confirm the deploy branch is `main`, the persistent disk is mounted at `/data`, and the health check is `/health`.
+3. Set the private owner password and AI API key when prompted; confirm generated session secrets are present.
+4. Add `SECRET_ENCRYPTION_KEY` as a private environment variable before saving any exchange or Telegram credentials.
+5. Keep live trading flags OFF. Do not add live exchange keys for the initial public demonstration.
+6. Deploy, then verify sign-in, sign-out, CSRF-protected writes, AI connection test, health check, SQLite persistence across redeploy, logs and backup/restore.
+7. Restrict access to the owner until the production security review is complete.
+
+A successful CI build does not mean a Render service has been created or deployed.
+
+## Verification
+
+GitHub Actions runs backend pytest tests and the frontend TypeScript/Vite production build. The OMONUX integration head `0c5dc51e7a04101ecac117d8baf46abe4d5ddb18` passed both jobs in CI run #210. That verifies those automated checks only; it does not replace deployment, integration, security, exchange-testnet or backup/restore testing.
