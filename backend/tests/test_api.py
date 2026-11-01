@@ -54,6 +54,7 @@ def test_health_and_core_records(tmp_path, monkeypatch):
 def test_invalid_stage_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB", tmp_path / "invalid.db")
     with TestClient(main.app) as client:
+        login(client, monkeypatch)
         response = client.post("/api/v1/crm/leads", json={
             "name": "Bad Stage", "stage": "invented"
         })
@@ -62,6 +63,7 @@ def test_invalid_stage_is_rejected(tmp_path, monkeypatch):
 def test_paper_portfolio_prevents_short_sales_and_backtests(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB", tmp_path / "trading.db")
     with TestClient(main.app) as client:
+        login(client, monkeypatch)
         buy = client.post("/api/v1/trading/paper/trades", json={
             "symbol": "ETHUSD", "side": "buy", "quantity": 1,
             "reference_price": 100
