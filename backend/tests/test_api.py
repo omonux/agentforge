@@ -560,3 +560,18 @@ def test_live_analytics_fifo_realized_pnl_and_open_inventory(tmp_path, monkeypat
         assert data["matched_sell_quantity_by_symbol"]["BTCUSDT"] == "1"
         assert float(data["open_inventory_fifo_cost_usdt"]) == 100.5
 
+
+
+def test_logout_revokes_server_side_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "session-revocation.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        session_token = client.cookies["agentforge_session"]
+        assert client.get("/api/v1/auth/me").status_code == 200
+
+        logout = client.post("/api/v1/auth/logout")
+        assert logout.status_code == 200
+
+        # Simulate a copied cookie being replayed after logout.
+        client.cookies.set("agentforge_session", session_token)
+        assert client.get("/api/v1/auth/me").status_code == 401
