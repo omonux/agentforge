@@ -373,7 +373,7 @@ async def approve_publish(draft_id:str,req:Approve):
  if row["status"]!="ready_for_approval" or not row["video_path"] or not Path(row["video_path"]).is_file():
   raise HTTPException(409,"Only a fully rendered video awaiting approval can be uploaded.")
  tok=await access_token()
- metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"\\n\\n"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
+ metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"\n\n"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
  with conn() as c:
   changed=c.execute("UPDATE yt_drafts SET status='uploading',error=NULL WHERE id=? AND status='ready_for_approval'",(draft_id,))
   if changed.rowcount!=1: raise HTTPException(409,"This draft is already being uploaded or has already been processed.")
