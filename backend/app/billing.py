@@ -316,6 +316,58 @@ def _opay_signature_ok(payload: dict, signature: str | None, secret: str):
         return False
 
 
+def _paystack_plan_for_code(plan_code: str):
+    for plan in PLAN_KEYS:
+        if _plan_code(plan) == plan_code and plan_code:
+            return plan
+    return None
+
+
+def _paystack_subscription_event(event_name: str, data: dict):
+    subscription = data.get("subscription") or data
+    code = str(subscription.get("subscription_code") or data.get("subscription_code") or "")
+    if not code:
+        return
+    if event_name == "subscription.disable":
+        state = "cancelled"
+    elif event_name == "invoice.payment_failed":
+        state = "past_due"
+    elif event_name in ("subscription.create", "invoice.payment_success"):
+        state = "active"
+    else:
+        return
+    customer = data.get("customer") or subscription.get("customer") or {}
+    email = str(customer.get("email") or "").lower()
+    plan_info = data.get("plan") or subscription.get("plan") or {}
+    plan_code = str(plan_info.get("plan_code") or "")
+    plan = _paystack_plan_for_code(plan_code)
+    if not email or not plan:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT customer_email,plan FROM billing_subscriptions WHERE provider='paystack' AND provider_subscription_id=?",
+                (code,)).fetchone()
+        if row:
+            email, plan = row["customer_email"], row["plan"]
+    if not email or not plan:
+        return
+    next_date = subscription.get("next_payment_date") or data.get("next_payment_date")
+    now = _now()
+    with _db() as conn:
+        existing = conn.execute(
+            "SELECT id,current_period_end FROM billing_subscriptions WHERE provider='paystack' AND customer_email=? AND plan=?",
+            (email, plan)).fetchone()
+        ident = existing["id"] if existing else secrets.token_urlsafe(18)
+        period_end = next_date or (existing["current_period_end"] if existing else None)
+        conn.execute("""INSERT INTO billing_subscriptions
+            (id,provider,customer_email,plan,status,current_period_end,provider_subscription_id,
+             last_payment_reference,created_at,updated_at)
+            VALUES(?,'paystack',?,?,?,?,?,?,?,?)
+            ON CONFLICT(provider,customer_email,plan) DO UPDATE SET
+            status=excluded.status,current_period_end=COALESCE(excluded.current_period_end,billing_subscriptions.current_period_end),
+            provider_subscription_id=excluded.provider_subscription_id,updated_at=excluded.updated_at""",
+            (ident, email, plan, state, period_end, code, None, now, now))
+
+
 @router.post("/webhooks/paystack")
 async def paystack_webhook(request: Request):
     init_billing_db()
@@ -327,9 +379,13 @@ async def paystack_webhook(request: Request):
         event = json.loads(raw)
     except ValueError:
         raise HTTPException(400, "Invalid webhook JSON.")
-    if event.get("event") != "charge.success":
-        return {"received": True}
+    event_name = event.get("event")
     data = event.get("data") or {}
+    if event_name in ("subscription.create", "subscription.disable", "invoice.payment_failed", "invoice.payment_success"):
+        _paystack_subscription_event(event_name, data)
+        return {"received": True}
+    if event_name != "charge.success":
+        return {"received": True}
     reference = str(data.get("reference") or "")
     if not reference or len(reference) > 80:
         return {"received": True}
