@@ -128,6 +128,61 @@ async def trends(req:Discover):
   rows=[x for x in rows if q in (x["title"]+" "+x["description"]+" "+x["channel"]).lower()]
  return {"region":youtube_config()[3],"items":rows,"notice":"Popular videos are discovery signals, not a guarantee of future trends. Create original videos; do not re-upload other creators' work."}
 
+
+async def fetch_channel_analytics(days:int=28):
+ tok=await access_token()
+ end=(datetime.now(timezone.utc).date()-timedelta(days=2))
+ start=end-timedelta(days=days-1)
+ base_params={"ids":"channel==MINE","startDate":start.isoformat(),"endDate":end.isoformat(),"dimensions":"day","sort":"day"}
+ headers={"Authorization":"Bearer "+tok}
+ async with httpx.AsyncClient(timeout=35) as h:
+  channel=await h.get("https://www.googleapis.com/youtube/v3/channels",params={"part":"statistics","mine":"true"},headers=headers)
+  if channel.status_code>=400: raise HTTPException(502,"YouTube channel statistics could not be loaded.")
+  channel_items=channel.json().get("items",[])
+  subscriber_count=int(channel_items[0].get("statistics",{}).get("subscriberCount",0)) if channel_items else None
+  params={**base_params,"metrics":"views,subscribersGained,subscribersLost,estimatedRevenue"}
+  response=await h.get("https://youtubeanalytics.googleapis.com/v2/reports",params=params,headers=headers)
+  revenue_available=response.status_code<400
+  if not revenue_available:
+   params["metrics"]="views,subscribersGained,subscribersLost"
+   response=await h.get("https://youtubeanalytics.googleapis.com/v2/reports",params=params,headers=headers)
+  if response.status_code>=400: raise HTTPException(502,"YouTube Analytics is unavailable. Reconnect with YouTube Analytics permissions and check channel access.")
+ data=response.json(); rows_data=data.get("rows",[])
+ headers_meta=[x.get("name") for x in data.get("columnHeaders",[])]
+ totals={"views":0,"subscribers_gained":0,"subscribers_lost":0,"estimated_revenue":None}
+ for row in rows_data:
+  values=dict(zip(headers_meta,row))
+  totals["views"]+=int(values.get("views",0) or 0)
+  totals["subscribers_gained"]+=int(values.get("subscribersGained",0) or 0)
+  totals["subscribers_lost"]+=int(values.get("subscribersLost",0) or 0)
+  if revenue_available:
+   totals["estimated_revenue"]=(totals["estimated_revenue"] or 0)+float(values.get("estimatedRevenue",0) or 0)
+ return {"period_days":days,"start_date":start.isoformat(),"end_date":end.isoformat(),
+         "subscriber_count":subscriber_count,"totals":totals,"currency":"USD",
+         "revenue_available":revenue_available,
+         "notice":"YouTube Analytics data can be delayed. Estimated revenue is available only for eligible monetized channels with monetary analytics permission."}
+
+@router.get("/analytics")
+async def channel_analytics(days:int=28):
+ if days<7 or days>90: raise HTTPException(400,"days must be between 7 and 90.")
+ return await fetch_channel_analytics(days)
+
+@router.post("/analytics/send-telegram")
+async def send_analytics_to_telegram(days:int=28):
+ if days<7 or days>90: raise HTTPException(400,"days must be between 7 and 90.")
+ report=await fetch_channel_analytics(days)
+ totals=report["totals"]
+ revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: not available (check monetization and Google Analytics permission)"
+ message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\\n"
+          +"Views: "+str(totals["views"])+"\\n"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\\n"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\\n"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\\n"
+          +revenue)
+ sent=await send_telegram_message(message)
+ if not sent: raise HTTPException(409,"Configure and test Telegram in Connect API first.")
+ return {"sent":True,"message":"YouTube analytics report sent to Telegram."}
+
 @router.post("/drafts")
 async def create_draft(req:Draft):
  ai_base,ai_key,ai_model=ai_config()
