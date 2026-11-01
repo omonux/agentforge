@@ -156,3 +156,134 @@ async def _get_paystack_verification(reference, secret):
             return response.json()
     except (httpx.HTTPError, ValueError):
         raise HTTPException(502, "Paystack verification is temporarily unavailable.")
+
+
+@router.get("/status")
+def billing_status():
+    return {
+        "paystack_configured": bool(os.getenv("PAYSTACK_SECRET_KEY")),
+        "opay_configured": all(os.getenv(k) for k in ("OPAY_PUBLIC_KEY", "OPAY_SECRET_KEY", "OPAY_MERCHANT_ID")),
+        "opay_country": os.getenv("OPAY_COUNTRY", "NG"),
+        "opay_currency": os.getenv("OPAY_CURRENCY", "NGN"),
+        "prices_configured": all(_price(plan) for plan in PLAN_KEYS),
+        "live_payments_enabled": os.getenv("BILLING_LIVE_ENABLED", "false").lower() == "true",
+        "customer_entitlements_enforced": False,
+    }
+
+
+@router.get("/plans")
+def billing_plans():
+    return {
+        "currency": "NGN",
+        "plans": [
+            {"id": "pro_monthly", "name": "Pro", "amount_minor": _price("pro_monthly"),
+             "recurring_available": bool(_plan_code("pro_monthly"))},
+            {"id": "business_monthly", "name": "Business", "amount_minor": _price("business_monthly"),
+             "recurring_available": bool(_plan_code("business_monthly"))},
+        ],
+        "notice": "Prices must be configured privately. OPay renewals are manual.",
+    }
+
+
+@router.get("/payments")
+def billing_payments():
+    init_billing_db()
+    with _db() as conn:
+        return [dict(row) for row in conn.execute(
+            """SELECT reference,provider,customer_email,plan,amount_minor,currency,status,
+            provider_transaction_id,created_at,updated_at,verified_at
+            FROM billing_payments ORDER BY created_at DESC LIMIT 200"""
+        )]
+
+
+@router.get("/subscriptions")
+def billing_subscriptions():
+    init_billing_db()
+    with _db() as conn:
+        return [dict(row) for row in conn.execute(
+            """SELECT id,provider,customer_email,plan,status,current_period_end,
+            provider_subscription_id,last_payment_reference,created_at,updated_at
+            FROM billing_subscriptions ORDER BY created_at DESC LIMIT 200"""
+        )]
+
+
+@router.post("/checkout")
+async def create_checkout(data: CheckoutInput):
+    init_billing_db()
+    if not _valid_email(data.email):
+        raise HTTPException(400, "Enter a valid customer email address.")
+    if os.getenv("BILLING_LIVE_ENABLED", "false").lower() != "true":
+        raise HTTPException(503, "Billing is disabled until merchant setup and sandbox testing are complete.")
+    amount = _price(data.plan)
+    if not amount:
+        raise HTTPException(503, "This plan has no configured NGN price.")
+    base_url = os.getenv("BILLING_BASE_URL", "").rstrip("/")
+    if not base_url.startswith("https://"):
+        raise HTTPException(503, "Set BILLING_BASE_URL to the public HTTPS application URL.")
+    reference = "af_" + secrets.token_urlsafe(22).replace("-", "").replace("_", "")[:28]
+    email = data.email.lower()
+    _insert_payment(reference, data.provider, email, data.plan, amount, "NGN")
+    try:
+        if data.provider == "paystack":
+            secret = os.getenv("PAYSTACK_SECRET_KEY", "")
+            if not secret:
+                raise HTTPException(503, "Paystack secret key is not configured.")
+            body = {
+                "email": email, "amount": str(amount), "currency": "NGN",
+                "reference": reference, "callback_url": base_url + "/billing/return",
+                "channels": ["card"],
+                "metadata": {"plan": data.plan, "product": "AgentForge"},
+            }
+            plan_code = _plan_code(data.plan)
+            if plan_code:
+                body["plan"] = plan_code
+                body.pop("amount", None)
+            result = await _post_json(
+                "https://api.paystack.co/transaction/initialize",
+                {"Authorization": "Bearer " + secret, "Content-Type": "application/json"}, body)
+            if not result.get("status") or not isinstance(result.get("data"), dict):
+                raise HTTPException(502, "Paystack did not create a checkout session.")
+            checkout_url = result["data"].get("authorization_url", "")
+            if not _safe_checkout_url(checkout_url, "paystack"):
+                raise HTTPException(502, "Paystack returned an unexpected checkout destination.")
+            _update_checkout(reference, checkout_url, str(result["data"].get("reference") or reference))
+        else:
+            public_key = os.getenv("OPAY_PUBLIC_KEY", "")
+            merchant_id = os.getenv("OPAY_MERCHANT_ID", "")
+            if not public_key or not merchant_id:
+                raise HTTPException(503, "OPay merchant public key and merchant ID are not configured.")
+            country = os.getenv("OPAY_COUNTRY", "NG").upper()
+            currency = os.getenv("OPAY_CURRENCY", "NGN").upper()
+            if country != "NG" or currency != "NGN":
+                raise HTTPException(503, "OPay checkout is configured for Nigeria NGN only.")
+            api_base = os.getenv("OPAY_API_BASE_URL", "https://sandboxapi.opaycheckout.com").rstrip("/")
+            body = {
+                "country": country, "reference": reference,
+                "amount": {"total": amount, "currency": currency},
+                "returnUrl": base_url + "/billing/return",
+                "callbackUrl": base_url + "/api/v1/billing/webhooks/opay",
+                "cancelUrl": base_url + "/billing/cancel",
+                "expireAt": 30, "userInfo": {"userEmail": email},
+                "productList": [{
+                    "productId": data.plan, "name": "AgentForge " + data.plan,
+                    "description": "AgentForge monthly plan", "price": amount, "quantity": 1,
+                }],
+                "payMethod": "BankCard",
+            }
+            result = await _post_json(
+                api_base + "/api/v1/international/cashier/create",
+                {"Authorization": "Bearer " + public_key, "MerchantId": merchant_id,
+                 "Content-Type": "application/json"}, body)
+            if result.get("code") != "00000" or not isinstance(result.get("data"), dict):
+                raise HTTPException(502, "OPay did not create a hosted checkout.")
+            checkout_url = result["data"].get("cashierUrl", "")
+            if not _safe_checkout_url(checkout_url, "opay"):
+                raise HTTPException(502, "OPay returned an unexpected cashier destination.")
+            _update_checkout(reference, checkout_url, str(result["data"].get("orderNo") or ""))
+    except Exception:
+        with _db() as conn:
+            conn.execute("""UPDATE billing_payments SET status='failed',updated_at=?
+                WHERE reference=? AND status='initializing'""", (_now(), reference))
+        raise
+    return {"reference": reference, "provider": data.provider, "checkout_url": checkout_url,
+            "status": "pending", "message": "Complete payment on the provider's hosted checkout."}
