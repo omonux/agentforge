@@ -38,6 +38,8 @@ async def life(app):
   c.execute("INSERT OR IGNORE INTO auto_trade_settings(id,updated) VALUES(1,?)",(stamp(),))
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_positions(id TEXT PRIMARY KEY,symbol TEXT NOT NULL,side TEXT NOT NULL,quantity REAL NOT NULL,entry_price REAL NOT NULL,stop_price REAL NOT NULL,target_price REAL NOT NULL,opened TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
+  c.execute("CREATE TABLE IF NOT EXISTS trading_safety_state(id INTEGER PRIMARY KEY CHECK(id=1),emergency_stopped INTEGER NOT NULL DEFAULT 0,reason TEXT,updated TEXT NOT NULL)")
+  c.execute("INSERT OR IGNORE INTO trading_safety_state(id,updated) VALUES(1,?)",(stamp(),))
  scheduler=asyncio.create_task(auto_trade_scheduler())
  try:
   yield
@@ -505,8 +507,39 @@ def auto_trade_config(x:AutoTradeConfig):
    (x.mode,x.risk_percent,x.min_confidence,x.max_open_positions,x.max_daily_loss_percent,x.cooldown_minutes,x.max_trades_per_day,x.max_notional_percent,stamp()))
  return auto_trade_status()
 
+@app.get("/api/v1/trading/safety/status")
+def trading_safety_status():
+ state=one("SELECT emergency_stopped,reason,updated FROM trading_safety_state WHERE id=1")
+ if not state: return {"emergency_stopped":False,"reason":None,"updated":None}
+ return {"emergency_stopped":bool(state["emergency_stopped"]),"reason":state["reason"],"updated":state["updated"],"scope":"paper automatic trading engine only"}
+
+class SafetyStopRequest(BaseModel):
+ reason:str=Field(default="Operator emergency stop",min_length=3,max_length=240)
+
+class SafetyResetRequest(BaseModel):
+ confirmation:str
+
+@app.post("/api/v1/trading/safety/emergency-stop")
+def trading_emergency_stop(x:SafetyStopRequest):
+ with db() as c:
+  c.execute("UPDATE trading_safety_state SET emergency_stopped=1,reason=?,updated=? WHERE id=1",(x.reason,stamp()))
+  c.execute("UPDATE auto_trade_settings SET running=0,updated=? WHERE id=1",(stamp(),))
+ auto_event("EMERGENCY_STOP",details=x.reason)
+ return trading_safety_status()
+
+@app.post("/api/v1/trading/safety/reset")
+def trading_safety_reset(x:SafetyResetRequest):
+ if x.confirmation!="RESET TRADING SAFETY":
+  raise HTTPException(400,'Type exactly "RESET TRADING SAFETY" to clear the stop latch.')
+ with db() as c:
+  c.execute("UPDATE trading_safety_state SET emergency_stopped=0,reason=NULL,updated=? WHERE id=1",(stamp(),))
+ auto_event("SAFETY_RESET",details="Operator manually cleared emergency stop; engine remains stopped")
+ return trading_safety_status()
+
 @app.post("/api/v1/trading/auto/start")
 def auto_trade_start():
+ if trading_safety_status()["emergency_stopped"]:
+  raise HTTPException(423,"Emergency stop is active. Review the incident and manually reset trading safety before restarting.")
  with db() as c: c.execute("UPDATE auto_trade_settings SET running=1,updated=? WHERE id=1",(stamp(),))
  auto_event("ENGINE_STARTED",details="Paper trading engine started")
  return auto_trade_status()
@@ -523,6 +556,8 @@ def auto_trade_events():
 
 @app.post("/api/v1/trading/auto/run-once")
 async def auto_trade_run_once():
+ if trading_safety_status()["emergency_stopped"]:
+  raise HTTPException(423,"Emergency stop is active. No trading cycle can run until an operator manually resets safety.")
  settings=auto_settings()
  if not settings["running"]:
   raise HTTPException(409,"Start the paper trading engine before running a cycle.")
