@@ -32,6 +32,8 @@ services:
         sync: false
       - key: BILLING_BASE_URL
         sync: false
+      - key: BILLING_ENABLED
+        value: "false"
       - key: BILLING_LIVE_ENABLED
         value: "false"
       - key: AGENTFORGE_PRO_MONTHLY_NGN
