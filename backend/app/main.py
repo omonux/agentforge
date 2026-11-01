@@ -500,7 +500,7 @@ def auth_me(request:Request):
 @app.middleware("http")
 async def require_private_workspace(request:Request,call_next):
  path=request.url.path
- if path=="/health" or path=="/api/v1/auth/login" or path=="/api/v1/auth/me":
+ if path=="/health" or path=="/api/v1/auth/login" or path=="/api/v1/auth/me" or path in ("/api/v1/billing/webhooks/paystack", "/api/v1/billing/webhooks/opay"):
   return await call_next(request)
  cfg=auth_config()
  if not cfg:
@@ -706,3 +706,7 @@ app.include_router(omonux_live_execution_router)
 # OMONUX Bybit execution, reconciliation, analytics, strategy research and Telegram alerts.
 from .omonux_live_ops import router as omonux_live_ops_router
 app.include_router(omonux_live_ops_router)
+
+# Hosted Paystack and OPay checkout; only signed provider webhooks bypass workspace auth.
+from .billing import router as billing_router
+app.include_router(billing_router)
