@@ -57,6 +57,25 @@ async def ask(agent,prompt):
  except Exception: raise HTTPException(502,"AI provider request failed or returned an invalid response.")
 @app.get("/health")
 def health(): return {"status":"ok","ai_configured":bool(BASE and KEY and MODEL)}
+
+# --- AI provider diagnostics (never return credentials) ---
+@app.get("/api/v1/ai/status")
+def ai_status():
+ configured=bool(BASE and KEY and MODEL)
+ provider="OpenAI" if BASE.startswith("https://api.openai.com") else ("OpenAI-compatible" if BASE else "Not configured")
+ return {"configured":configured,"provider":provider,"model":MODEL if configured else None,"base_url":BASE if configured else None,"key_present":bool(KEY)}
+
+@app.post("/api/v1/ai/test")
+async def ai_test():
+ if not (BASE and KEY and MODEL):
+  raise HTTPException(503,"OpenAI is not configured. Add AI_API_KEY in your hosting environment and set AI_BASE_URL and AI_MODEL.")
+ try:
+  answer=await ask("research","Reply with exactly: AgentForge AI connection successful.")
+  return {"connected":True,"provider":"OpenAI" if BASE.startswith("https://api.openai.com") else "OpenAI-compatible","model":MODEL,"message":answer}
+ except HTTPException as e:
+  if e.status_code==502: raise HTTPException(502,"The AI provider could not complete the test. Check the API key, model name and API billing/limits in your provider dashboard.")
+  raise
+
 @app.get("/api/v1/agents")
 def agents(): return [{"id":k,"name":v[0],"description":v[1]} for k,v in AGENTS.items()]
 @app.post("/api/v1/tasks")
