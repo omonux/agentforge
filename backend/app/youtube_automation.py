@@ -180,11 +180,16 @@ async def send_analytics_to_telegram(days:int=28):
  report=await fetch_channel_analytics(days)
  totals=report["totals"]
  revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: not available (check monetization and Google Analytics permission)"
- message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\n"
-          +"Views: "+str(totals["views"])+"\n"
-          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\n"
-          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\n"
-          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\n"
+ message=("AgentForge YouTube report ("+report["start_date"]+" to "+report["end_date"]+")
+"
+          +"Views: "+str(totals["views"])+"
+"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"
+"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"
+"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"
+"
           +revenue)
  sent=await send_telegram_message(message)
  if not sent: raise HTTPException(409,"Configure and test Telegram in Connect API first.")
@@ -227,9 +232,13 @@ def _captions(script:str):
  cursor=0.0; parts=[]
  for index,sentence in enumerate(sentences):
   span=duration*max(1,len(sentence.split()))/total_words
-  parts.append(f"{index+1}\n{_srt_time(cursor)} --> {_srt_time(cursor+span)}\n{sentence}\n")
+  parts.append(f"{index+1}
+{_srt_time(cursor)} --> {_srt_time(cursor+span)}
+{sentence}
+")
   cursor+=span
- return "\n".join(parts)
+ return "
+".join(parts)
 
 @router.post("/drafts/{draft_id}/voice")
 async def generate_voice(draft_id:str):
@@ -272,7 +281,9 @@ def draft_captions(draft_id:str):
 async def save_rendered_video(draft_id:str,output,row):
  url=output[0] if isinstance(output,list) and output else output
  if isinstance(url,dict): url=url.get("url") or url.get("video")
- if not isinstance(url,str) or not url.startswith("https://"): raise HTTPException(502,"Video provider returned an invalid output URL.")
+ if not isinstance(url,str): raise HTTPException(502,"Video provider returned an invalid output URL.")
+ parsed_output=urllib.parse.urlparse(url)
+ if parsed_output.scheme!="https" or not ((parsed_output.hostname or "")=="replicate.delivery" or (parsed_output.hostname or "").endswith(".replicate.delivery")): raise HTTPException(502,"Video provider returned an untrusted output host.")
  VIDEO_DIR.mkdir(parents=True,exist_ok=True)
  path=VIDEO_DIR/(draft_id+".mp4")
  async with httpx.AsyncClient(timeout=240,follow_redirects=True) as h:
@@ -333,6 +344,8 @@ async def render_status(draft_id:str):
  if not row: raise HTTPException(404,"Draft not found.")
  if row["status"]!="rendering" or not row["render_prediction_url"]:
   return {"id":draft_id,"status":row["status"],"has_video":bool(row["video_path"])}
+ parsed_prediction=urllib.parse.urlparse(row["render_prediction_url"])
+ if parsed_prediction.scheme!="https" or parsed_prediction.hostname!="api.replicate.com": raise HTTPException(502,"Saved render status URL is not a trusted Replicate endpoint.")
  try:
   async with httpx.AsyncClient(timeout=45) as h:
    response=await h.get(row["render_prediction_url"],headers={"Authorization":"Bearer "+video_key})
@@ -345,6 +358,10 @@ async def render_status(draft_id:str):
    await send_telegram_message("AgentForge: video rendering failed for draft "+row["title"][:160])
    return {"id":draft_id,"status":"render_failed","message":"Video provider reported a failed render. Review the model settings and try a new draft."}
   return await save_rendered_video(draft_id,prediction["output"],row)
+ except HTTPException as exc:
+  if exc.status_code>=500:
+   with conn() as c: c.execute("UPDATE yt_drafts SET status='render_failed',error=? WHERE id=? AND status='rendering'",(str(exc.detail)[:500],draft_id))
+  raise
  except httpx.RequestError:
   raise HTTPException(502,"Could not reach the video provider to check render status.")
 
@@ -380,7 +397,9 @@ async def approve_publish(draft_id:str,req:Approve):
  if row["status"]!="ready_for_approval" or not row["video_path"] or not Path(row["video_path"]).is_file():
   raise HTTPException(409,"Only a fully rendered video awaiting approval can be uploaded.")
  tok=await access_token()
- metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"\n\n"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
+ metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"
+
+"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
  with conn() as c:
   changed=c.execute("UPDATE yt_drafts SET status='uploading',error=NULL WHERE id=? AND status='ready_for_approval'",(draft_id,))
   if changed.rowcount!=1: raise HTTPException(409,"This draft is already being uploaded or has already been processed.")
