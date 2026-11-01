@@ -116,3 +116,8 @@ Configure the following privately in the hosting dashboard:
 The current app still has single-owner authentication. Billing records are stored by customer email, but **customer entitlements are not enforced** and there is no tenant isolation or public customer registration. Do not sell or grant paid access to customers until the multi-tenant account, entitlement, renewal, cancellation, refund, chargeback and support flows are implemented and reviewed. OPay recurring billing is not assumed; OPay renewals are manual in this foundation.
 
 Never collect card details in AgentForge forms, never paste merchant keys into chat or Git, and never enable live billing before sandbox testing and a security review.
+
+
+## Private company presentation
+
+For an owner-led presentation, use a separate private demo deployment with its own persistent disk, database path, credentials and synthetic sample data. Do not give the presenting company a login or connect real customer integrations. Follow the [Private Company Demo Guide](docs/PRIVATE_COMPANY_DEMO.md) before preparing a demonstration. This does not enable multi-company accounts or tenant isolation; those require a separate implementation and security review.
