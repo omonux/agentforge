@@ -402,8 +402,9 @@ def live_analytics():
             raw = json.loads(row["response"] or "{}")
             fills = raw.get("fills", []) if isinstance(raw, dict) else []
             for fill in fills:
-                asset = fill.get("commissionAsset", "unknown")
-                fees[asset] = str(Decimal(fees.get(asset, "0")) + Decimal(str(fill.get("commission", "0"))))
+                asset = fill.get("commissionAsset") or fill.get("feeCurrency") or "unknown"
+                amount = fill.get("commission", fill.get("execFee", "0"))
+                fees[asset] = str(Decimal(fees.get(asset, "0")) + Decimal(str(amount)))
         except (ValueError, InvalidOperation, TypeError):
             pass
     return {"orders_included": len(orders), "executed_quote_volume_usdt": str(volume),
