@@ -326,3 +326,21 @@ def test_omonux_paper_portfolio_reports_mark_to_market_pnl(tmp_path, monkeypatch
         assert data["total_pnl"] == 40
         assert data["positions"][0]["mark_price"] == 120
 
+
+
+def test_live_exchange_account_routes_require_separate_live_credentials(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "live-account.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        binance = client.post("/api/v1/trading/live-account/binance")
+        bybit = client.post("/api/v1/trading/live-account/bybit")
+        assert binance.status_code == 409
+        assert bybit.status_code == 409
+        assert "LIVE" in binance.json()["detail"]
+        assert "LIVE" in bybit.json()["detail"]
+
+
+def test_live_exchange_signatures_are_sha256_hex():
+    from app.omonux_live_account import binance_live_signature, bybit_live_signature
+    assert len(binance_live_signature("secret", {"timestamp": "123", "recvWindow": "5000"})) == 64
+    assert len(bybit_live_signature("secret", "123", "key", "accountType=UNIFIED")) == 64
