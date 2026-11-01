@@ -54,6 +54,7 @@ def test_checkout_is_disabled_until_explicitly_enabled(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB", tmp_path / "main.db")
     monkeypatch.setattr(billing, "DB", tmp_path / "billing.db")
     monkeypatch.setenv("AGENTFORGE_PRO_MONTHLY_NGN", "1500")
+    monkeypatch.setenv("BILLING_ENABLED", "false")
     monkeypatch.setenv("BILLING_LIVE_ENABLED", "false")
     monkeypatch.setenv("SESSION_SECRET", "test-session-secret-that-is-long-enough-123456")
     monkeypatch.setenv("ADMIN_PASSWORD", "strong-test-password-12345")
