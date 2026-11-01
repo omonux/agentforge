@@ -305,9 +305,27 @@ def calculate_positions():
   if abs(pos["quantity"])<1e-10: pos["quantity"]=0.0; pos["cost_basis"]=0.0
  return [dict(p,average_entry=(p["cost_basis"]/p["quantity"] if p["quantity"] else 0.0)) for p in positions.values() if p["quantity"]>0],realized
 @app.get("/api/v1/trading/paper/portfolio")
-def paper_portfolio():
+async def paper_portfolio():
  positions,realized=calculate_positions()
- return {"mode":"paper_only","positions":positions,"realized_pnl":round(realized,2),"open_positions":len(positions),"notice":"Unrealized P&L requires current market prices; none are inferred."}
+ unrealized_total=0.0
+ all_marked=True
+ for position in positions:
+  try:
+   candles=await fetch_candles(position["symbol"],"30m",60)
+   mark=float(candles[-1]["close"])
+   unrealized=(mark-position["average_entry"])*position["quantity"]
+   position["mark_price"]=mark
+   position["unrealized_pnl"]=round(unrealized,2)
+   position["total_pnl"]=round(position["realized_pnl"]+unrealized,2)
+   unrealized_total+=unrealized
+  except Exception:
+   # Keep the holding visible, but never invent a mark or report a partial
+   # portfolio total as if it covered every open position.
+   position["mark_price"]=None
+   position["unrealized_pnl"]=None
+   position["total_pnl"]=None
+   all_marked=False
+ return {"mode":"paper_only","positions":positions,"realized_pnl":round(realized,2),"unrealized_pnl":round(unrealized_total,2) if all_marked else None,"total_pnl":round(realized+unrealized_total,2) if all_marked else None,"open_positions":len(positions),"mark_to_market_complete":all_marked,"notice":"Unrealized P&L uses the latest available completed 30-minute candle. Totals are withheld if any open position cannot be priced."}
 @app.post("/api/v1/trading/backtests")
 def run_backtest(x:BacktestIn):
  if x.fast_window>=x.slow_window: raise HTTPException(400,"Fast window must be smaller than slow window.")
