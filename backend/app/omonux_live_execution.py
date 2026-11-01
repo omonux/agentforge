@@ -202,7 +202,6 @@ async def preview_binance_order(request: PreviewRequest):
         if notional > quote_available:
             raise HTTPException(400, "Insufficient free USDT balance for this buy order at the current reference price.")
     with db() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         used = conn.execute("SELECT COALESCE(SUM(CAST(notional_usdt AS REAL)),0) AS total FROM live_order_previews WHERE state IN ('submitting','submitted','unknown') AND created_at >= ?", (datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0).isoformat(),)).fetchone()["total"]
     if dec(used, "daily usage") + notional > daily_limit:
         raise HTTPException(400, f"Order would exceed the configured daily notional cap of {daily_limit} USDT.")
@@ -304,10 +303,11 @@ async def place_binance_order(request: PlaceRequest):
             response = await client.post(BASE_URL + "/api/v3/order", params=signed_params(secret, params), headers={"X-MBX-APIKEY": key})
         response.raise_for_status()
         data = response.json()
-    except httpx.HTTPStatusError:
+    except httpx.HTTPStatusError as exc:
+        uncertain = exc.response.status_code >= 500
         with db() as conn:
-            conn.execute("UPDATE live_order_previews SET state='exchange_error' WHERE id=? AND state='submitting'", (request.preview_id,))
-        raise HTTPException(502, "Binance returned an order error. Check exchange order history before retrying; the system will not resubmit this preview.")
+            conn.execute("UPDATE live_order_previews SET state=? WHERE id=? AND state='submitting'", ("unknown" if uncertain else "exchange_error", request.preview_id))
+        raise HTTPException(502, "Binance returned an uncertain server error. Check exchange order history before retrying; the system will not resubmit this preview." if uncertain else "Binance rejected the order. Review the exchange response and create a fresh preview if appropriate.")
     except httpx.RequestError:
         with db() as conn:
             conn.execute("UPDATE live_order_previews SET state='unknown' WHERE id=? AND state='submitting'", (request.preview_id,))
