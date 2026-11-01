@@ -30,6 +30,16 @@ VIDEO_DIR=Path(os.getenv("YOUTUBE_STORAGE_DIR","./storage/youtube")).resolve()
 SCOPES="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/yt-analytics-monetary.readonly"
 
 def now(): return datetime.now(timezone.utc).isoformat()
+def ensure_daily_report_columns(connection):
+    """Repair older yt_settings schemas before any daily-report query."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(yt_settings)").fetchall()}
+    if "telegram_daily_report_enabled" not in columns:
+        connection.execute("ALTER TABLE yt_settings ADD COLUMN telegram_daily_report_enabled INTEGER NOT NULL DEFAULT 0")
+    if "last_telegram_report_at" not in columns:
+        connection.execute("ALTER TABLE yt_settings ADD COLUMN last_telegram_report_at TEXT")
+    connection.commit()
+
+
 def conn():
  db_path=Path(os.getenv("DATABASE_PATH",str(app_main.DB)))
  db_path.parent.mkdir(parents=True,exist_ok=True); c=sqlite3.connect(db_path); c.row_factory=sqlite3.Row
@@ -185,6 +195,7 @@ async def channel_analytics(days:int=28):
 def daily_report_status():
  row=token_row()
  with conn() as c:
+  ensure_daily_report_columns(c)
   settings=c.execute("SELECT telegram_daily_report_enabled,last_telegram_report_at FROM yt_settings WHERE id=1").fetchone()
  return {"enabled":bool(settings and settings["telegram_daily_report_enabled"]),"last_sent_at":settings["last_telegram_report_at"] if settings else None,
          "youtube_connected":bool(row and read_secret("youtube_refresh_token")),
@@ -197,13 +208,16 @@ def set_daily_report(req:DailyReportIn):
  if req.enabled and not read_secret("youtube_refresh_token"):
   raise HTTPException(409,"Connect your YouTube channel before enabling daily analytics reports.")
  with conn() as c:
+  ensure_daily_report_columns(c)
   c.execute("UPDATE yt_settings SET telegram_daily_report_enabled=? WHERE id=1",(1 if req.enabled else 0,))
  return {"enabled":req.enabled,"message":"Daily Telegram analytics enabled." if req.enabled else "Daily Telegram analytics disabled."}
 
 async def maybe_send_daily_analytics_report():
  row=token_row()
  if not row or not read_secret("youtube_refresh_token"): return False
- with conn() as c: settings=c.execute("SELECT telegram_daily_report_enabled,last_telegram_report_at FROM yt_settings WHERE id=1").fetchone()
+ with conn() as c:
+  ensure_daily_report_columns(c)
+  settings=c.execute("SELECT telegram_daily_report_enabled,last_telegram_report_at FROM yt_settings WHERE id=1").fetchone()
  if not settings or not settings["telegram_daily_report_enabled"]: return False
  last=settings["last_telegram_report_at"]
  if last:
