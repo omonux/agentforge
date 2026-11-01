@@ -192,3 +192,51 @@ def test_omonux_chart_scan_requires_authentication(tmp_path, monkeypatch):
         )
         assert response.status_code == 401
 
+def test_omonux_integration_secrets_are_encrypted_and_never_returned(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(main, "DB", tmp_path / "integration-secrets.db")
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        saved = client.put("/api/v1/trading/integrations/secrets", json={
+            "name": "telegram_bot_token", "value": "123456:private-test-token"
+        })
+        assert saved.status_code == 200
+        assert saved.json() == {
+            "saved": True, "name": "telegram_bot_token", "value_returned": False
+        }
+        status = client.get("/api/v1/trading/integrations/status").json()
+        assert status["secrets"]["telegram_bot_token"] is True
+        assert status["telegram_ready"] is False
+        with sqlite3.connect(main.DB) as conn:
+            ciphertext = conn.execute(
+                "SELECT ciphertext FROM integration_secrets WHERE name='telegram_bot_token'"
+            ).fetchone()[0]
+        assert b"123456:private-test-token" not in ciphertext
+
+        deleted = client.delete("/api/v1/trading/integrations/secrets/telegram_bot_token")
+        assert deleted.status_code == 200
+        assert client.get("/api/v1/trading/integrations/status").json()["secrets"]["telegram_bot_token"] is False
+
+
+def test_omonux_integration_secrets_fail_closed_without_encryption_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "integration-no-key.db")
+    monkeypatch.delenv("SECRET_ENCRYPTION_KEY", raising=False)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.put("/api/v1/trading/integrations/secrets", json={
+            "name": "binance_api_key", "value": "never-store-this-in-plaintext"
+        })
+        assert response.status_code == 503
+        assert client.get("/api/v1/trading/integrations/status").json()["encryption_configured"] is False
+
+
+def test_omonux_telegram_test_requires_saved_credentials(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "telegram-test.db")
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.post("/api/v1/trading/integrations/telegram/test")
+        assert response.status_code == 409
+
