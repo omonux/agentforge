@@ -1,4 +1,4 @@
-import os, sqlite3, uuid
+import os, sqlite3, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal
 from pathlib import Path
 from datetime import datetime, timezone
@@ -38,7 +38,13 @@ async def life(app):
   c.execute("INSERT OR IGNORE INTO auto_trade_settings(id,updated) VALUES(1,?)",(stamp(),))
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_positions(id TEXT PRIMARY KEY,symbol TEXT NOT NULL,side TEXT NOT NULL,quantity REAL NOT NULL,entry_price REAL NOT NULL,stop_price REAL NOT NULL,target_price REAL NOT NULL,opened TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
- yield
+ scheduler=asyncio.create_task(auto_trade_scheduler())
+ try:
+  yield
+ finally:
+  scheduler.cancel()
+  try: await scheduler
+  except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"],allow_credentials=True)
 class Task(BaseModel):
@@ -457,6 +463,15 @@ def auto_settings():
 def auto_event(kind,symbol=None,details=None,pnl=None):
  with db() as c:
   c.execute("INSERT INTO auto_trade_events VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),kind,symbol,details,pnl,stamp()))
+
+async def auto_trade_scheduler():
+ while True:
+  try:
+   if auto_settings()["running"]:
+    await auto_trade_run_once()
+  except Exception as exc:
+   auto_event("SCHEDULER_ERROR",details=str(exc))
+  await asyncio.sleep(60)
 
 @app.get("/api/v1/trading/auto/status")
 def auto_trade_status():
