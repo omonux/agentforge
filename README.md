@@ -1,84 +1,40 @@
-# 🤖 AgentForge
+# AgentForge by Omonux
+An AI workforce workspace for small businesses.
 
-**AI Agents That Do Your Work.**
+## Modules
+- Customer support: policy-grounded draft replies and escalation.
+- Sales: prospect qualification and outreach drafts.
+- Content Studio: original scripts, hooks and captions.
+- Automation: reviewable workflow plans.
+- Research: source-aware reports.
+- Omonux Trading: isolated paper-trading journal; live trading disabled.
 
-AgentForge is a platform that builds, deploys, and manages autonomous AI agents for your business. Research, sales outreach, customer support, data entry — all automated in minutes.
+## Structure
+- `apps/web`: React + TypeScript + Vite dashboard.
+- `backend`: FastAPI API, SQLite development persistence and configurable chat-completion provider.
+- `index.html`: original landing page retained during migration.
 
-## ✨ Features
-
-- 🔍 **Research Agents** — Scrape the web, compile reports, deliver insights in seconds
-- ✉️ **Outreach Agents** — Draft personalized cold emails, follow-ups, and sequences
-- 📊 **Data Agents** — Parse, clean, and analyze spreadsheets and databases
-- 💬 **Support Agents** — Handle customer tickets 24/7 with natural language
-- ⚡ **Workflow Automation** — Chain agents into pipelines across your stack
-- 🔐 **Enterprise Security** — SOC 2, data isolation, role-based access
-
-## 🚀 Live Demo
-
-The landing page includes a **working AI agent chat** — try it:
-
+## Run locally
+Backend:
 ```bash
-cd agentforge
-python3 -m http.server 8080
-# Open http://localhost:8080
+cd backend
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --port 8000
 ```
-
-Ask the agent to:
-- "Research the AI market"
-- "Draft a cold email"
-- "Plan my SaaS launch"
-- "Analyze my sales data"
-
-## 💰 Pricing
-
-| Plan | Price | What You Get |
-|------|-------|--------------|
-| Starter | Free | 1 agent, 100 tasks/mo |
-| Pro | $49/mo | Unlimited agents, 10k tasks, API |
-| Enterprise | Custom | Dedicated infra, SLA, SSO |
-
-## 🛠 Tech Stack
-
-- Pure HTML/CSS/JS (zero dependencies)
-- Single-file deployment
-- Responsive design
-- Dark theme
-
-## 📦 Deploy
-
-### Option 1: GitHub Pages
+Frontend:
 ```bash
-# In repo Settings → Pages → set source to main branch
-# Site goes live at https://<username>.github.io/agentforge
+cd apps/web
+npm install
+npm run dev
 ```
+Set `AI_BASE_URL`, `AI_API_KEY` and `AI_MODEL` in backend/.env for real model-backed tasks. Never commit credentials.
 
-### Option 2: Vercel
-```bash
-npm i -g vercel
-vercel
-```
+## Safety and truth in product
+A task is complete only after a successful provider response. Missing provider configuration is reported as an error, not replaced with fake output. External messaging, publishing, payments and trading require separate integrations and explicit approvals. Omonux Trading is paper-only and does not place live orders or promise returns.
 
-### Option 3: Netlify
-```bash
-npm i -g netlify-cli
-netlify deploy --prod
-```
-
-### Option 4: Any static host
-Just upload `index.html` — that's the entire app.
-
-## 📁 Structure
-
-```
-agentforge/
-└── index.html    # Entire app (HTML + CSS + JS)
-```
-
-## 📬 Contact
-
-- Email: emmanuelomonu709@gmail.com
-- GitHub: [omonux](https://github.com/omonux)
-
-## 📄 License
-
-MIT — do whatever you want with it.
+## Status
+Active foundation, not production-ready. Authentication, tenant isolation, PostgreSQL, durable queues, file ingestion, connectors, billing, tests, monitoring and deployment hardening are still required before a public paid launch.

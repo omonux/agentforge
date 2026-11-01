@@ -1,52 +1,23 @@
-# AgentForge product roadmap
+# AgentForge roadmap
 
-## Product promise
-A clear AI workspace where a small business can delegate repeatable work, inspect what happened, and approve consequential actions.
+## Experience
+Simple navigation, understandable controls, responsive layout, visible task states, saved results, honest errors, source transparency and approval before consequential external actions.
 
-## Experience principles
-1. Simple navigation with one obvious next action.
-2. Every task has an owner, status, inputs, output and timestamp.
-3. Show sources, uncertainty and provider errors.
-4. Preview before send, publish, purchase or trade.
-5. Explain permissions and costs before connecting services.
-6. Responsive desktop-first dashboard with accessible contrast and keyboard support.
+## Foundation
+- React/TypeScript workspace.
+- FastAPI backend and local SQLite persistence.
+- Five specialist task types using a configurable OpenAI-compatible API.
+- Task history and provider configuration checks.
+- Omonux Trading paper journal only.
 
-## Release sequence
+## Private alpha
+Authentication and verified email; PostgreSQL migrations and tenant isolation; Redis job queue; safe document ingestion; source citations; support knowledge base; CRM import; outreach drafts; content calendar; approved publishing connectors; workflow builder; Telegram opt-in notifications; audit log and usage metering.
 
-### Foundation (current development branch)
-- React + TypeScript workspace shell.
-- FastAPI service and SQLite development persistence.
-- Five agent task types with a configurable OpenAI-compatible provider.
-- Task history and transparent provider-configuration errors.
-- Omonux Trading paper-trade journal, with no broker execution.
+## Paid beta
+Payment integration with verified webhooks; subscription lifecycle; usage limits; onboarding; referral tracking; templates; product analytics; customer support; automated unit, integration, accessibility and end-to-end tests.
 
-### Private alpha
-- Authentication, email verification and password reset.
-- PostgreSQL migrations, tenant isolation and role-based access.
-- Redis-backed queue and worker process for long-running jobs.
-- File upload, safe parsing, document retrieval and citations.
-- Customer support knowledge base and ticket connector.
-- CRM import, lead qualification and outreach drafts.
-- Content calendar, media-generation provider adapter and approval queue.
-- Workflow builder with allowlisted connectors, scoped tokens and audit trail.
-- Telegram notifications with opt-in and per-workspace settings.
-- Usage metering, plan limits and cost visibility.
-
-### Paid beta
-- Payment provider integration and verified webhook handling.
-- Subscription lifecycle, invoices, cancellation and refunds.
-- Usage caps and abuse prevention.
-- Public template gallery and referral attribution.
-- Onboarding, help centre, product analytics and feedback loops.
-- Automated unit, integration, accessibility and end-to-end tests.
-
-### Omonux Trading expansion
-- Licensed market-data providers and transparent quote timestamps.
-- Watchlists, alerts and research notebooks.
-- Historical backtesting with fees, slippage and survivorship-bias warnings.
-- Paper portfolio, drawdown limits and risk reporting.
-- Independent security and legal review before considering any broker connectivity.
-- Live execution remains disabled until the owner explicitly approves a separate, compliant scope.
+## Omonux Trading
+Licensed market data with timestamps; watchlists; historical backtesting with fees and slippage; paper portfolio; drawdown controls; security and jurisdiction-specific legal review before any live broker connection. Live trading remains disabled.
 
 ## Business validation
-Interview target users before adding broad features. Measure activation, weekly active workspaces, successful tasks, repeat usage, support burden, gross margin, conversion and churn. Treat $500/week as a target to validate, not a promise.
+Interview target users, focus on customer support/sales/content operations, measure activation, repeat use, retention, conversion, cost per task and gross margin. $500/week is a goal, not a promise.
