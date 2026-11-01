@@ -310,9 +310,16 @@ async def place_bybit(request: BybitPlace):
     try:
         result = await bybit_request("POST", "/v5/order/create", key, secret, body=body)
     except HTTPException:
+        # Persist the client order link even when the HTTP response is ambiguous.
+        # Reconciliation can then query Bybit by orderLinkId without ever resubmitting.
         with db() as conn:
             conn.execute("UPDATE live_order_previews SET state='unknown' WHERE id=? AND state='submitting'", (request.preview_id,))
-        raise HTTPException(502, "Bybit order result may be uncertain. Check Bybit order history before any further action; this preview cannot be retried.")
+            conn.execute("""INSERT OR IGNORE INTO live_orders(id,preview_id,exchange_order_id,client_order_id,
+                symbol,side,quantity,executed_quantity,quote_quantity,status,response,created_at,exchange_name)
+                VALUES(?,?,NULL,?,?,?,?,?,?,?,'{}',?,'bybit')""",
+                (str(uuid.uuid4()), request.preview_id, client_id, preview["symbol"], preview["side"],
+                 preview["quantity"], "0", "0", "UNKNOWN", stamp()))
+        raise HTTPException(502, "Bybit order result may be uncertain. Its client order ID has been saved for reconciliation. Check Bybit order history; this preview cannot be retried.")
     order_id = result.get("orderId", "")
     with db() as conn:
         conn.execute("""INSERT INTO live_orders(id,preview_id,exchange_order_id,client_order_id,symbol,side,quantity,
@@ -336,13 +343,20 @@ async def reconcile_orders():
         try:
             if exchange == "bybit":
                 key, secret = bybit_keys()
-                data = await bybit_request("GET", "/v5/order/realtime", key, secret,
-                                           {"category": "spot", "symbol": order["symbol"], "orderId": order["exchange_order_id"]})
+                lookup = {"category": "spot", "symbol": order["symbol"]}
+                if order["exchange_order_id"]:
+                    lookup["orderId"] = order["exchange_order_id"]
+                else:
+                    lookup["orderLinkId"] = order["client_order_id"]
+                data = await bybit_request("GET", "/v5/order/realtime", key, secret, lookup)
                 item = next(iter(data.get("list", [])), None)
                 if not item:
-                    history = await bybit_request("GET", "/v5/order/history", key, secret,
-                                                   {"category": "spot", "symbol": order["symbol"], "orderId": order["exchange_order_id"]})
-                    item = next(iter(history.get("list", [])), {})
+                    history = await bybit_request("GET", "/v5/order/history", key, secret, lookup)
+                    item = next(iter(history.get("list", [])), None)
+                if not item:
+                    results.append({"id": order["id"], "exchange": exchange,
+                                    "status": "UNKNOWN", "notice": "No matching exchange order found yet; do not resubmit."})
+                    continue
                 status = item.get("orderStatus", order["status"])
                 executed = item.get("cumExecQty", order["executed_quantity"] or "0")
                 quote = item.get("cumExecValue", order["quote_quantity"] or "0")
@@ -370,13 +384,19 @@ async def reconcile_orders():
                     trades_response = await client.get("https://api.binance.com/api/v3/myTrades", params=trade_params, headers={"X-MBX-APIKEY": key})
                 trades_response.raise_for_status()
                 detail = {"order": item, "fills": trades_response.json()}
+            previous_executed = Decimal(str(order["executed_quantity"] or "0"))
+            current_executed = Decimal(str(executed or "0"))
             with db() as conn:
-                conn.execute("UPDATE live_orders SET status=?,executed_quantity=?,quote_quantity=?,response=? WHERE id=?",
-                             (status, executed, quote, json.dumps(detail), order["id"]))
-            if Decimal(str(executed)) > 0:
+                conn.execute("UPDATE live_orders SET exchange_order_id=COALESCE(exchange_order_id,?),status=?,executed_quantity=?,quote_quantity=?,response=? WHERE id=?",
+                             (item.get("orderId"), status, str(current_executed), quote, json.dumps(detail), order["id"]))
+            # Notify only when the cumulative executed quantity increases; repeated
+            # reconciliation must not spam duplicate fill messages.
+            if current_executed > previous_executed:
                 await queue_alert("FILL" if status in ("FILLED", "Filled") else "PARTIAL_FILL",
                                   {"exchange": exchange, "symbol": order["symbol"], "side": order["side"],
-                                   "executed_quantity": executed, "quote_value": quote, "status": status})
+                                   "newly_executed_quantity": str(current_executed-previous_executed),
+                                   "cumulative_executed_quantity": str(current_executed),
+                                   "quote_value": quote, "status": status})
             results.append({"id": order["id"], "exchange": exchange, "status": status, "executed_quantity": executed, "quote_quantity": quote})
         except Exception as exc:
             results.append({"id": order["id"], "exchange": exchange, "error": str(exc)[:240]})
