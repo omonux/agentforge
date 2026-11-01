@@ -1,9 +1,9 @@
 name: AgentForge CI
 on:
   push:
-    branches: [main, "rebuild/**"]
+    branches: [main, "rebuild/**", "integration/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "integration/**"]
 jobs:
   backend:
     runs-on: ubuntu-latest
