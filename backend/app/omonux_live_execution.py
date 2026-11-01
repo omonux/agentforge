@@ -113,7 +113,8 @@ class ResetRequest(BaseModel):
 @router.get("/status")
 def live_trading_status():
     ensure_tables()
-    state = db().execute("SELECT emergency_stopped,reason,updated FROM live_trading_state WHERE id=1").fetchone()
+    with db() as conn:
+        state = conn.execute("SELECT emergency_stopped,reason,updated FROM live_trading_state WHERE id=1").fetchone()
     return {
         "exchange": "Binance Spot",
         "feature_enabled": os.getenv("LIVE_TRADING_ENABLED", "").lower() == "true",
@@ -201,7 +202,8 @@ async def preview_binance_order(request: PreviewRequest):
         if notional > quote_available:
             raise HTTPException(400, "Insufficient free USDT balance for this buy order at the current reference price.")
     with db() as conn:
-        used = conn.execute("SELECT COALESCE(SUM(CAST(quote_quantity AS REAL)),0) AS total FROM live_orders WHERE created_at >= ?", (datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0).isoformat(),)).fetchone()["total"]
+        conn.execute("BEGIN IMMEDIATE")
+        used = conn.execute("SELECT COALESCE(SUM(CAST(notional_usdt AS REAL)),0) AS total FROM live_order_previews WHERE state IN ('submitting','submitted','unknown') AND created_at >= ?", (datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0).isoformat(),)).fetchone()["total"]
     if dec(used, "daily usage") + notional > daily_limit:
         raise HTTPException(400, f"Order would exceed the configured daily notional cap of {daily_limit} USDT.")
     preview_id = str(uuid.uuid4())
@@ -265,6 +267,19 @@ async def place_binance_order(request: PlaceRequest):
         raise HTTPException(409, "Market price moved more than 0.5% since preview. Generate a new preview and review it.")
     quantity = dec(preview["quantity"], "quantity")
     notional = quantity * current_price
+    symbol_info = await public_binance_get("/api/v3/exchangeInfo", {"symbol": preview["symbol"]})
+    rules = next((item for item in symbol_info.get("symbols", []) if item.get("symbol") == preview["symbol"]), None)
+    if not rules or rules.get("status") != "TRADING" or not rules.get("isSpotTradingAllowed", False):
+        raise HTTPException(400, "The symbol is no longer eligible for Binance Spot trading.")
+    if preview["side"] == "SELL":
+        base_asset = rules["baseAsset"]
+        free = next((dec(b["free"], "free balance") for b in account.get("balances", []) if b.get("asset") == base_asset), Decimal("0"))
+        if quantity > free:
+            raise HTTPException(400, f"Insufficient free {base_asset} balance at final validation.")
+    else:
+        free_usdt = next((dec(b["free"], "free balance") for b in account.get("balances", []) if b.get("asset") == "USDT"), Decimal("0"))
+        if notional > free_usdt:
+            raise HTTPException(400, "Insufficient free USDT balance at final validation.")
     per_order, daily_limit = risk_limits()
     if notional > per_order:
         raise HTTPException(400, "Current estimated notional now exceeds the per-order risk cap.")
@@ -272,7 +287,7 @@ async def place_binance_order(request: PlaceRequest):
         used = conn.execute("SELECT COALESCE(SUM(CAST(quote_quantity AS REAL)),0) AS total FROM live_orders WHERE created_at >= ?", (datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0).isoformat(),)).fetchone()["total"]
         if dec(used, "daily usage") + notional > daily_limit:
             raise HTTPException(400, "Current order would exceed the daily notional risk cap.")
-        # Atomically claim the preview to prevent concurrent double submission.
+        # Atomically claim the preview and reserve its full estimated notional.
         cur = conn.execute("UPDATE live_order_previews SET state='submitting' WHERE id=? AND state='pending'", (request.preview_id,))
         if cur.rowcount != 1:
             raise HTTPException(409, "This preview is already being processed.")
