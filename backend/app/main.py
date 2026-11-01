@@ -32,6 +32,7 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS content_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,channel TEXT NOT NULL,format TEXT NOT NULL,status TEXT NOT NULL,script TEXT,caption TEXT,created TEXT,updated TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS workflows(id TEXT PRIMARY KEY,name TEXT NOT NULL,trigger_name TEXT NOT NULL,action_plan TEXT NOT NULL,status TEXT NOT NULL,created TEXT,updated TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS watchlist(id TEXT PRIMARY KEY,symbol TEXT NOT NULL UNIQUE,note TEXT,created TEXT)")
+  c.execute("CREATE TABLE IF NOT EXISTS backtests(id TEXT PRIMARY KEY,symbol TEXT,fast_window INTEGER,slow_window INTEGER,initial_cash REAL,final_equity REAL,return_pct REAL,max_drawdown_pct REAL,trade_count INTEGER,created TEXT,report TEXT)")
  yield
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"])
@@ -82,6 +83,9 @@ def trades():
 @app.post("/api/v1/trading/paper/trades")
 def paper(t:PaperTrade):
  if t.side not in ("buy","sell"): raise HTTPException(400,"Side must be buy or sell.")
+ positions,_=calculate_positions()
+ held=next((p["quantity"] for p in positions if p["symbol"]==t.symbol.upper()),0.0)
+ if t.side=="sell" and t.quantity>held+1e-10: raise HTTPException(400,f"Cannot sell {t.quantity}; paper position is {held}.")
  tid=str(uuid.uuid4())
  with db() as c: c.execute("INSERT INTO paper_trades VALUES(?,?,?,?,?,?)",(tid,t.symbol.upper(),t.side,t.quantity,t.reference_price,stamp()))
  return {"id":tid,"symbol":t.symbol.upper(),"side":t.side,"quantity":t.quantity,"reference_price":t.reference_price,"status":"simulated","notice":"Simulation only. No real order was placed."}
@@ -112,6 +116,14 @@ class WorkflowIn(BaseModel):
  name:str=Field(min_length=2,max_length=160)
  trigger_name:str=Field(min_length=2,max_length=160)
  action_plan:str=Field(min_length=2,max_length=10000)
+class BacktestIn(BaseModel):
+ symbol:str=Field(min_length=2,max_length=20,pattern=r"^[A-Za-z0-9._-]+$")
+ closes:list[float]=Field(min_length=30,max_length=5000)
+ fast_window:int=Field(ge=2,le=100)
+ slow_window:int=Field(ge=5,le=300)
+ initial_cash:float=Field(gt=0,le=100000000)
+ fee_bps:float=Field(default=10,ge=0,le=100)
+ slippage_bps:float=Field(default=5,ge=0,le=100)
 class WatchItem(BaseModel):
  symbol:str=Field(min_length=2,max_length=20,pattern=r"^[A-Za-z0-9._-]+$")
  note:str|None=None
@@ -213,3 +225,54 @@ def delete_watch(ident:str):
 @app.get("/api/v1/analytics/summary")
 def analytics():
  return {"tasks_total":one("SELECT COUNT(*) AS n FROM tasks")["n"],"tasks_completed":one("SELECT COUNT(*) AS n FROM tasks WHERE status='completed'")["n"],"leads_total":one("SELECT COUNT(*) AS n FROM leads")["n"],"tickets_open":one("SELECT COUNT(*) AS n FROM tickets WHERE status IN ('open','pending','escalated')")["n"],"content_drafts":one("SELECT COUNT(*) AS n FROM content_items WHERE status='draft'")["n"],"paper_trades":one("SELECT COUNT(*) AS n FROM paper_trades")["n"]}
+
+# --- Research-grade paper trading utilities: user-supplied close prices only ---
+def calculate_positions():
+ trades=rows("SELECT * FROM paper_trades ORDER BY created ASC")
+ positions={}
+ realized=0.0
+ for trade in trades:
+  sym=trade["symbol"]; side=trade["side"]; qty=float(trade["qty"]); price=float(trade["price"])
+  pos=positions.setdefault(sym,{"symbol":sym,"quantity":0.0,"cost_basis":0.0,"realized_pnl":0.0})
+  if side=="buy":
+   pos["quantity"]+=qty; pos["cost_basis"]+=qty*price
+  else:
+   avg=pos["cost_basis"]/pos["quantity"] if pos["quantity"] else 0.0
+   pnl=(price-avg)*qty
+   pos["realized_pnl"]+=pnl; realized+=pnl
+   pos["quantity"]-=qty; pos["cost_basis"]-=avg*qty
+  if abs(pos["quantity"])<1e-10: pos["quantity"]=0.0; pos["cost_basis"]=0.0
+ return [dict(p,average_entry=(p["cost_basis"]/p["quantity"] if p["quantity"] else 0.0)) for p in positions.values() if p["quantity"]>0],realized
+@app.get("/api/v1/trading/paper/portfolio")
+def paper_portfolio():
+ positions,realized=calculate_positions()
+ return {"mode":"paper_only","positions":positions,"realized_pnl":round(realized,2),"open_positions":len(positions),"notice":"Unrealized P&L requires current market prices; none are inferred."}
+@app.post("/api/v1/trading/backtests")
+def run_backtest(x:BacktestIn):
+ if x.fast_window>=x.slow_window: raise HTTPException(400,"Fast window must be smaller than slow window.")
+ if any(v<=0 for v in x.closes): raise HTTPException(400,"All close prices must be positive numbers.")
+ cash=float(x.initial_cash); units=0.0; peak=cash; max_dd=0.0; trades_count=0; equity=[]
+ fee=x.fee_bps/10000; slip=x.slippage_bps/10000
+ prev_signal=0
+ for i,close in enumerate(x.closes):
+  if i+1<x.slow_window:
+   equity.append(cash+units*close); continue
+  fast=sum(x.closes[i-x.fast_window+1:i+1])/x.fast_window
+  slow=sum(x.closes[i-x.slow_window+1:i+1])/x.slow_window
+  signal=1 if fast>slow else 0
+  if signal==1 and prev_signal==0 and units==0:
+   fill=close*(1+slip); units=cash/(fill*(1+fee)); cash=0.0; trades_count+=1
+  elif signal==0 and prev_signal==1 and units>0:
+   fill=close*(1-slip); cash=units*fill*(1-fee); units=0.0; trades_count+=1
+  prev_signal=signal
+  value=cash+units*close; equity.append(value); peak=max(peak,value)
+  if peak>0: max_dd=max(max_dd,(peak-value)/peak)
+ final=cash+units*x.closes[-1]
+ buy_hold=x.initial_cash*(x.closes[-1]/x.closes[0])
+ report={"strategy":"Long-only simple moving-average crossover","data_points":len(x.closes),"assumptions":"User-supplied closing prices; fee and slippage applied on simulated fills; no dividends, taxes, funding, borrow or market impact.","buy_and_hold_equity":round(buy_hold,2),"strategy_equity":round(final,2),"cash":round(cash,2),"open_units":round(units,8),"equity_curve":[round(v,2) for v in equity[-250:]]}
+ ident=str(uuid.uuid4()); ret=(final/x.initial_cash-1)*100
+ with db() as conn: conn.execute("INSERT INTO backtests VALUES(?,?,?,?,?,?,?,?,?,?,?)",(ident,x.symbol.upper(),x.fast_window,x.slow_window,x.initial_cash,final,ret,max_dd*100,trades_count,stamp(),str(report)))
+ return {"id":ident,"symbol":x.symbol.upper(),"return_pct":round(ret,2),"max_drawdown_pct":round(max_dd*100,2),"trade_count":trades_count,"report":report,"warning":"Historical simulation on supplied prices only. Not a prediction, recommendation or guarantee."}
+@app.get("/api/v1/trading/backtests")
+def list_backtests():
+ return rows("SELECT id,symbol,fast_window,slow_window,initial_cash,final_equity,return_pct,max_drawdown_pct,trade_count,created FROM backtests ORDER BY created DESC LIMIT 100")
