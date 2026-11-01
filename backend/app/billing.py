@@ -287,3 +287,108 @@ async def create_checkout(data: CheckoutInput):
         raise
     return {"reference": reference, "provider": data.provider, "checkout_url": checkout_url,
             "status": "pending", "message": "Complete payment on the provider's hosted checkout."}
+
+
+def _paystack_signature_ok(raw: bytes, signature: str | None, secret: str):
+    if not signature:
+        return False
+    expected = hmac.new(secret.encode(), raw, hashlib.sha512).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def _opay_signature_ok(payload: dict, signature: str | None, secret: str):
+    if not signature:
+        return False
+    try:
+        refunded = "t" if payload.get("refunded") is True else "f"
+        keys = ("amount", "currency", "reference", "status", "timestamp", "transactionId")
+        if any(payload.get(key) is None for key in keys):
+            return False
+        signed = (
+            f'{{Amount:"{payload["amount"]}",Currency:"{payload["currency"]}",'
+            f'Reference:"{payload["reference"]}",Refunded:{refunded},'
+            f'Status:"{payload["status"]}",Timestamp:"{payload["timestamp"]}",'
+            f'Token:"{payload.get("token") or ""}",TransactionID:"{payload["transactionId"]}"}}'
+        )
+        expected = hmac.new(secret.encode(), signed.encode(), hashlib.sha3_512).hexdigest()
+        return hmac.compare_digest(expected.lower(), signature.lower())
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+@router.post("/webhooks/paystack")
+async def paystack_webhook(request: Request):
+    init_billing_db()
+    secret = os.getenv("PAYSTACK_SECRET_KEY", "")
+    raw = await request.body()
+    if not secret or not _paystack_signature_ok(raw, request.headers.get("x-paystack-signature"), secret):
+        raise HTTPException(401, "Invalid Paystack webhook signature.")
+    try:
+        event = json.loads(raw)
+    except ValueError:
+        raise HTTPException(400, "Invalid webhook JSON.")
+    if event.get("event") != "charge.success":
+        return {"received": True}
+    data = event.get("data") or {}
+    reference = str(data.get("reference") or "")
+    if not reference or len(reference) > 80:
+        return {"received": True}
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM billing_payments WHERE reference=? AND provider='paystack'",
+                           (reference,)).fetchone()
+    if not row:
+        return {"received": True}
+    verified_result = await _get_paystack_verification(reference, secret)
+    verified = verified_result.get("data") or {}
+    if (verified_result.get("status") and verified.get("status") == "success"
+        and str(verified.get("reference")) == reference
+        and int(verified.get("amount", -1)) == int(row["amount_minor"])
+        and str(verified.get("currency", "")).upper() == row["currency"]):
+        _mark_payment(reference, "paystack", "success", str(verified.get("id") or ""))
+    elif verified.get("status") in ("failed", "reversed"):
+        _mark_payment(reference, "paystack", "failed")
+    return {"received": True}
+
+
+@router.post("/webhooks/opay")
+async def opay_webhook(request: Request):
+    init_billing_db()
+    secret = os.getenv("OPAY_SECRET_KEY", "")
+    try:
+        event = await request.json()
+    except ValueError:
+        raise HTTPException(400, "Invalid OPay callback JSON.")
+    payload = event.get("payload") or {}
+    if not secret or not _opay_signature_ok(payload, event.get("sha512"), secret):
+        raise HTTPException(401, "Invalid OPay callback signature.")
+    reference = str(payload.get("reference") or "")
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM billing_payments WHERE reference=? AND provider='opay'",
+                           (reference,)).fetchone()
+    if not row:
+        return {"received": True}
+    # Confirm the callback independently using OPay's transaction-status API.
+    merchant_id = os.getenv("OPAY_MERCHANT_ID", "")
+    api_base = os.getenv("OPAY_API_BASE_URL", "https://sandboxapi.opaycheckout.com").rstrip("/")
+    country = os.getenv("OPAY_COUNTRY", "NG").upper()
+    currency = os.getenv("OPAY_CURRENCY", "NGN").upper()
+    query = {"reference": reference, "country": country}
+    query_body = json.dumps(query, separators=(",", ":"))
+    signature = hmac.new(secret.encode(), query_body.encode(), hashlib.sha512).hexdigest()
+    result = await _post_json(
+        api_base + "/api/v1/international/cashier/status",
+        {"Authorization": "Bearer " + signature, "MerchantId": merchant_id,
+         "Content-Type": "application/json"}, query)
+    verified = result.get("data") or {}
+    try:
+        amount_ok = int(verified.get("amount", {}).get("total", -1)) == int(row["amount_minor"])
+    except (TypeError, ValueError):
+        amount_ok = False
+    if (result.get("code") == "00000" and verified.get("status") == "SUCCESS"
+        and str(verified.get("reference")) == reference and amount_ok
+        and str(verified.get("amount", {}).get("currency", "")).upper() == row["currency"]
+        and country == "NG" and currency == row["currency"]):
+        _mark_payment(reference, "opay", "success", str(verified.get("orderNo") or ""))
+    elif verified.get("status") in ("FAIL", "CLOSE"):
+        _mark_payment(reference, "opay", "failed", str(verified.get("orderNo") or ""))
+    return {"received": True}
