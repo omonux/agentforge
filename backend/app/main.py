@@ -71,14 +71,27 @@ async def life(app):
    await asyncio.sleep(1 if processed else max(2,int(os.getenv("WORKFLOW_POLL_SECONDS","3"))))
  scheduler=asyncio.create_task(auto_trade_scheduler())
  live_scheduler=asyncio.create_task(live_reconciliation_scheduler())
+ async def youtube_telegram_scheduler():
+  await asyncio.sleep(30)
+  while True:
+   try:
+    from .youtube_automation import maybe_send_daily_analytics_report
+    await maybe_send_daily_analytics_report()
+   except asyncio.CancelledError:
+    raise
+   except Exception:
+    pass
+   await asyncio.sleep(max(300,int(os.getenv("YOUTUBE_TELEGRAM_POLL_SECONDS","3600"))))
  workflow_scheduler=asyncio.create_task(workflow_queue_scheduler())
+ youtube_telegram_task=asyncio.create_task(youtube_telegram_scheduler())
  try:
   yield
  finally:
   scheduler.cancel()
   live_scheduler.cancel()
   workflow_scheduler.cancel()
-  for task in (scheduler,live_scheduler,workflow_scheduler):
+  youtube_telegram_task.cancel()
+  for task in (scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task):
    try: await task
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
