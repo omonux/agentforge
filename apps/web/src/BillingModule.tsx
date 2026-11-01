@@ -3,7 +3,7 @@ import { CreditCard, ShieldCheck, RefreshCw, ArrowUpRight } from "lucide-react";
 import { API, apiFetch } from "./api";
 
 type Plan = { id: string; name: string; amount_minor: number | null; recurring_available: boolean };
-type BillingInfo = { paystack_configured: boolean; opay_configured: boolean; live_payments_enabled: boolean; customer_entitlements_enforced: boolean };
+type BillingInfo = { paystack_configured: boolean; opay_configured: boolean; checkout_enabled: boolean; live_payments_enabled: boolean; customer_entitlements_enforced: boolean };
 
 export default function BillingModule({ onNotice }: { onNotice: (message: string) => void }) {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -72,7 +72,7 @@ export default function BillingModule({ onNotice }: { onNotice: (message: string
         </select></label>
         <div className="roadmap"><b><CreditCard size={16}/></b><span>{plan?.name || "Plan"}<small>{price}</small></span><small>{plan?.recurring_available ? "PAYSTACK RECURRING" : "MONTHLY PLAN"}</small></div>
         <div className="twocol">
-          <button className="primary" disabled={!email || !info?.live_payments_enabled || busy!==""} onClick={()=>checkout("paystack")}>
+          <button className="primary" disabled={!email || !info?.checkout_enabled || busy!==""} onClick={()=>checkout("paystack")}>
             {busy==="paystack" ? "Opening..." : "Pay with Paystack"}
           </button>
           <button className="secondary" disabled={!email || !info?.live_payments_enabled || busy!==""} onClick={()=>checkout("opay")}>
