@@ -367,3 +367,33 @@ def test_trading_emergency_stop_is_latched_until_explicit_reset(tmp_path, monkey
         assert reset.status_code == 200
         assert reset.json()["emergency_stopped"] is False
         assert client.get("/api/v1/trading/auto/status").json()["running"] is False
+
+
+def test_live_execution_is_disabled_and_emergency_stopped_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "live-execution.db")
+    monkeypatch.delenv("LIVE_TRADING_ENABLED", raising=False)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        status = client.get("/api/v1/trading/live/status")
+        assert status.status_code == 200
+        assert status.json()["feature_enabled"] is False
+        assert status.json()["emergency_stopped"] is True
+        blocked = client.post("/api/v1/trading/live/binance/place", json={
+            "preview_id": "00000000-0000-0000-0000-000000000000",
+            "confirmation": "PLACE LIVE BUY BTCUSDT",
+        })
+        assert blocked.status_code == 423
+        reset = client.post("/api/v1/trading/live/reset", json={
+            "confirmation": "RESET LIVE TRADING SAFETY"
+        })
+        assert reset.status_code == 423
+
+
+def test_live_execution_preview_requires_separate_live_credentials(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "live-preview.db")
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        response = client.post("/api/v1/trading/live/binance/preview", json={
+            "symbol": "BTCUSDT", "side": "BUY", "quantity": "0.0001"
+        })
+        assert response.status_code == 409
