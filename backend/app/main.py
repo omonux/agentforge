@@ -114,8 +114,8 @@ def workspace_overview():
  youtube_connected = False
  if "yt_settings" in table_names:
   with db() as c:
-   row=c.execute("SELECT refresh_token FROM yt_settings WHERE id=1").fetchone()
-   youtube_connected=bool(row and row["refresh_token"])
+   row=c.execute("SELECT id FROM yt_settings WHERE id=1").fetchone()
+   youtube_connected=bool(row and read_integration_secret("youtube_refresh_token"))
  image_ready=bool(secret_or_env("image_api_key","IMAGE_API_KEY"))
  youtube_oauth_ready=bool(secret_or_env("youtube_client_id","YOUTUBE_CLIENT_ID") and secret_or_env("youtube_client_secret","YOUTUBE_CLIENT_SECRET"))
  billing_enabled=os.getenv("BILLING_ENABLED","false").lower()=="true"
