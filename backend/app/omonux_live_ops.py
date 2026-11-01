@@ -467,7 +467,10 @@ def get_alert_preferences():
     ensure_ops_tables()
     with db() as conn:
         row = conn.execute("SELECT enabled,on_fill,on_partial,on_reject,on_risk_stop,updated FROM live_alert_preferences WHERE id=1").fetchone()
-    return dict(row)
+    result = dict(row)
+    for key in ("enabled", "on_fill", "on_partial", "on_reject", "on_risk_stop"):
+        result[key] = bool(result[key])
+    return result
 
 
 @router.put("/alerts/preferences")
