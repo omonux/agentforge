@@ -290,3 +290,96 @@ async def trading_analysis(x:TradingAnalysisIn):
  f"Symbol: {x.symbol.upper()}\nTimeframe: {x.timeframe}\nUser-supplied market context:\n{x.market_context}")
  result=await ask("research",prompt)
  return {"symbol":x.symbol.upper(),"timeframe":x.timeframe,"analysis":result,"data_source":"user_supplied_context","disclaimer":"Educational scenario analysis only. Not a trading signal, personalized financial advice or a guarantee."}
+
+
+# --- Private single-owner authentication and browser session protection ---
+import base64, hashlib, hmac, secrets, time
+from collections import defaultdict, deque
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+
+SESSION_COOKIE = "agentforge_session"
+CSRF_COOKIE = "agentforge_csrf"
+LOGIN_ATTEMPTS = defaultdict(deque)
+
+class LoginInput(BaseModel):
+ username: str = Field(min_length=1, max_length=80)
+ password: str = Field(min_length=1, max_length=1024)
+
+def auth_config():
+ secret=os.getenv("SESSION_SECRET","")
+ password=os.getenv("ADMIN_PASSWORD","")
+ salt=os.getenv("ADMIN_PASSWORD_SALT","")
+ if len(secret)<32 or len(password)<14 or len(salt)<16:
+  return None
+ return secret.encode(),password,salt.encode()
+
+def make_session(secret:bytes):
+ expiry=int(time.time())+60*60*8
+ payload=f"owner:{expiry}"
+ signature=hmac.new(secret,payload.encode(),hashlib.sha256).digest()
+ return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")+"."+base64.urlsafe_b64encode(signature).decode().rstrip("=")
+
+def valid_session(token:str|None,secret:bytes):
+ if not token or "." not in token: return False
+ try:
+  p,s=token.split(".",1)
+  payload=base64.urlsafe_b64decode(p+"="*((4-len(p)%4)%4)).decode()
+  signature=base64.urlsafe_b64decode(s+"="*((4-len(s)%4)%4))
+  expected=hmac.new(secret,payload.encode(),hashlib.sha256).digest()
+  who,expiry=payload.split(":",1)
+  return who=="owner" and int(expiry)>int(time.time()) and hmac.compare_digest(signature,expected)
+ except Exception: return False
+
+def cookie_secure(): return os.getenv("COOKIE_SECURE","true").lower()=="true"
+
+@app.post("/api/v1/auth/login")
+def auth_login(data:LoginInput,request:Request,response:Response):
+ cfg=auth_config()
+ if not cfg: raise HTTPException(503,"Authentication is not configured. Set SESSION_SECRET, ADMIN_PASSWORD and ADMIN_PASSWORD_SALT.")
+ secret,password,salt=cfg
+ ip=request.client.host if request.client else "unknown"
+ now=time.time(); attempts=LOGIN_ATTEMPTS[ip]
+ while attempts and now-attempts[0]>900: attempts.popleft()
+ if len(attempts)>=5: raise HTTPException(429,"Too many sign-in attempts. Try again in 15 minutes.")
+ attempts.append(now)
+ candidate=hashlib.pbkdf2_hmac("sha256",data.password.encode(),salt,310000)
+ expected=hashlib.pbkdf2_hmac("sha256",password.encode(),salt,310000)
+ if data.username!="owner" or not hmac.compare_digest(candidate,expected):
+  raise HTTPException(401,"The username or password is incorrect.")
+ attempts.clear()
+ csrf=secrets.token_urlsafe(32)
+ response.set_cookie(SESSION_COOKIE,make_session(secret),httponly=True,secure=cookie_secure(),samesite="strict",max_age=28800,path="/")
+ response.set_cookie(CSRF_COOKIE,csrf,httponly=False,secure=cookie_secure(),samesite="strict",max_age=28800,path="/")
+ return {"authenticated":True,"username":"owner","csrf_token":csrf,"expires_in":28800}
+
+@app.post("/api/v1/auth/logout")
+def auth_logout(response:Response):
+ response.delete_cookie(SESSION_COOKIE,path="/",secure=cookie_secure(),httponly=True,samesite="strict")
+ response.delete_cookie(CSRF_COOKIE,path="/",secure=cookie_secure(),samesite="strict")
+ return {"authenticated":False}
+
+@app.get("/api/v1/auth/me")
+def auth_me(request:Request):
+ cfg=auth_config()
+ if not cfg or not valid_session(request.cookies.get(SESSION_COOKIE),cfg[0]):
+  raise HTTPException(401,"Sign in required.")
+ return {"authenticated":True,"username":"owner"}
+
+@app.middleware("http")
+async def require_private_workspace(request:Request,call_next):
+ path=request.url.path
+ if path=="/health" or path=="/api/v1/auth/login" or path=="/api/v1/auth/me":
+  return await call_next(request)
+ cfg=auth_config()
+ if not cfg:
+  return JSONResponse(status_code=503,content={"detail":"Private workspace authentication is not configured."})
+ secret=cfg[0]
+ if not valid_session(request.cookies.get(SESSION_COOKIE),secret):
+  return JSONResponse(status_code=401,content={"detail":"Sign in required."})
+ if request.method not in ("GET","HEAD","OPTIONS"):
+  cookie=request.cookies.get(CSRF_COOKIE,"")
+  header=request.headers.get("x-csrf-token","")
+  if not cookie or not header or not hmac.compare_digest(cookie,header):
+   return JSONResponse(status_code=403,content={"detail":"Security token missing or invalid. Refresh the page and try again."})
+ return await call_next(request)
