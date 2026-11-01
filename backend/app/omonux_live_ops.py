@@ -479,7 +479,7 @@ def live_analytics():
     realized_gross = Decimal("0")
     realized_usdt_fees = Decimal("0")
     unmatched_sells = {}
-    matched_quantity = Decimal("0")
+    matched_quantity_by_symbol = {}
     for fill in sorted(fills, key=lambda item: item["time"]):
         symbol = fill["symbol"]
         lots = inventory.setdefault(symbol, [])
@@ -495,7 +495,7 @@ def live_analytics():
             lot = lots[0]
             matched = min(remaining, lot["qty"])
             realized_gross += (price - lot["unit_cost"]) * matched
-            matched_quantity += matched
+            matched_quantity_by_symbol[symbol] = str(Decimal(matched_quantity_by_symbol.get(symbol, "0")) + matched)
             lot["qty"] -= matched
             remaining -= matched
             if lot["qty"] <= 0:
@@ -523,7 +523,7 @@ def live_analytics():
         "fees_by_asset": fees,
         "fifo_realized_gross_pnl_usdt": str(realized_gross),
         "fifo_realized_net_pnl_usdt": str(realized_net),
-        "matched_sell_quantity_by_symbol": {"all_symbols": str(matched_quantity)},
+        "matched_sell_quantity_by_symbol": matched_quantity_by_symbol,
         "unmatched_sell_quantity_by_symbol": unmatched_sells,
         "open_inventory_by_symbol": open_positions,
         "open_inventory_fifo_cost_usdt": str(open_cost),
