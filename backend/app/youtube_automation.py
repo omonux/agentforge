@@ -209,11 +209,11 @@ async def maybe_send_daily_analytics_report():
  if not (read_secret("telegram_bot_token") and read_secret("telegram_chat_id")): return False
  report=await fetch_channel_analytics(28); totals=report["totals"]
  revenue=("Estimated revenue: $"+format(totals["estimated_revenue"],".2f")) if report["revenue_available"] else "Estimated revenue: unavailable for this channel/permission"
- message=("AgentForge daily YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\\n"
-          +"Views: "+str(totals["views"])+"\\n"
-          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\\n"
-          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\\n"
-          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\\n"
+ message=("AgentForge daily YouTube report ("+report["start_date"]+" to "+report["end_date"]+")\n"
+          +"Views: "+str(totals["views"])+"\n"
+          +"Subscribers gained: "+str(totals["subscribers_gained"])+"\n"
+          +"Subscribers lost: "+str(totals["subscribers_lost"])+"\n"
+          +"Net subscriber change: "+str(totals["subscribers_gained"]-totals["subscribers_lost"])+"\n"
           +revenue)
  sent=await send_telegram_message(message)
  if sent:
