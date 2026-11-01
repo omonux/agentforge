@@ -572,3 +572,6 @@ app.include_router(omonux_chart_router)
 # Encrypted OMONUX exchange and Telegram integration settings.
 from .omonux_integrations import router as omonux_integrations_router
 app.include_router(omonux_integrations_router)
+# Read-only exchange account checks are restricted to exchange testnets.
+from .omonux_exchange_testnet import router as omonux_exchange_router
+app.include_router(omonux_exchange_router)
