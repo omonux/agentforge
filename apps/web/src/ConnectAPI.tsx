@@ -107,7 +107,7 @@ export default function ConnectAPI({ onNotice }: Props) {
       {services.map(service => <article className="connect-card" key={service.id}>
         <div className="connect-card-head">
           <div><span className="connect-group-label">{service.group}</span><h3>{service.name}</h3><p>{service.description}</p></div>
-          <span className={"connect-state " + (service.check?.status === "connected" ? "connected" : service.configured ? "configured" : "missing")}>{service.check?.status === "connected" ? "Test passed" : service.configured ? "Configured" : "Needs setup"}</span>
+          <span className={"connect-state " + (service.check?.status === "connected" ? "connected" : service.configured ? "configured" : "missing")}>{service.check?.status === "connected" ? "Test passed" : service.check?.status === "manual" ? "Manual verification" : service.configured ? "Configured" : "Needs setup"}</span>
         </div>
         <div className="connect-fields">
           {service.fields.map(field => <div className="connect-field" key={field.name}>
