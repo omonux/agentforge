@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .main import db, stamp
 
 router = APIRouter(prefix="/api/v1/trading/integrations", tags=["OMONUX Integrations"])
-ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "telegram_bot_token", "telegram_chat_id"}
+ALLOWED_SECRET_NAMES = {"binance_api_key", "binance_api_secret", "bybit_api_key", "bybit_api_secret", "binance_live_api_key", "binance_live_api_secret", "bybit_live_api_key", "bybit_live_api_secret", "telegram_bot_token", "telegram_chat_id"}
 
 
 def cipher():
