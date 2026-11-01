@@ -1,4 +1,4 @@
-import os, sqlite3, uuid, secrets, json, urllib.parse, asyncio
+import os, sqlite3, uuid, secrets, json, urllib.parse, asyncio, re, subprocess, shutil
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import httpx
@@ -199,30 +199,147 @@ async def create_draft(req:Draft):
  await send_telegram_message("AgentForge: a new YouTube script draft is ready for review: "+str(package["title"])[:180])
  return {"id":ident,"title":package["title"],"description":package["description"],"script":package["script"],"status":"script_ready","message":"Script package created. A rendered video is still required before approval and upload."}
 
+
+def voice_config():
+ return (cfg("elevenlabs_api_key","ELEVENLABS_API_KEY"),
+         cfg("elevenlabs_voice_id","ELEVENLABS_VOICE_ID"),
+         cfg("elevenlabs_model","ELEVENLABS_MODEL","eleven_multilingual_v2"))
+
+def _srt_time(seconds:float):
+ millis=max(0,int(seconds*1000))
+ hours,millis=divmod(millis,3600000)
+ minutes,millis=divmod(millis,60000)
+ secs,millis=divmod(millis,1000)
+ return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+def _captions(script:str):
+ sentences=[x.strip() for x in re.split(r"(?<=[.!?])\\s+",script) if x.strip()]
+ if not sentences: sentences=[script.strip()]
+ total_words=sum(max(1,len(x.split())) for x in sentences)
+ duration=max(8.0,total_words/2.35)
+ cursor=0.0; parts=[]
+ for index,sentence in enumerate(sentences):
+  span=duration*max(1,len(sentence.split()))/total_words
+  parts.append(f"{index+1}\\n{_srt_time(cursor)} --> {_srt_time(cursor+span)}\\n{sentence}\\n")
+  cursor+=span
+ return "\\n".join(parts)
+
+@router.post("/drafts/{draft_id}/voice")
+async def generate_voice(draft_id:str):
+ with conn() as c: row=c.execute("SELECT * FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
+ if not row: raise HTTPException(404,"Draft not found.")
+ voice_key,voice_id,voice_model=voice_config()
+ if not voice_key or not voice_id: raise HTTPException(409,"Add ElevenLabs API key and voice ID in Connect API first.")
+ try:
+  async with httpx.AsyncClient(timeout=180) as h:
+   response=await h.post("https://api.elevenlabs.io/v1/text-to-speech/"+urllib.parse.quote(voice_id,safe=""),
+    headers={"xi-api-key":voice_key,"Accept":"audio/mpeg","Content-Type":"application/json"},
+    json={"text":row["script"][:12000],"model_id":voice_model,"voice_settings":{"stability":0.48,"similarity_boost":0.72}})
+  if response.status_code>=400: raise HTTPException(502,"ElevenLabs rejected the narration request. Check voice access and account limits.")
+  audio=response.content
+  if len(audio)<1000 or not (audio.startswith(b"ID3") or audio[:1]==b"\xff"):
+   raise HTTPException(502,"Voice provider did not return valid MP3 audio.")
+  if len(audio)>30_000_000: raise HTTPException(502,"Generated narration exceeded the 30 MB safety limit.")
+ except httpx.RequestError:
+  raise HTTPException(502,"Could not reach the voice provider.")
+ VIDEO_DIR.mkdir(parents=True,exist_ok=True)
+ voice_path=VIDEO_DIR/(draft_id+".mp3")
+ caption_path=VIDEO_DIR/(draft_id+".srt")
+ voice_path.write_bytes(audio)
+ caption_path.write_text(_captions(row["script"]),encoding="utf-8")
+ with conn() as c:
+  c.execute("UPDATE yt_drafts SET voice_path=?,captions_path=? WHERE id=?",(str(voice_path),str(caption_path),draft_id))
+ await send_telegram_message("AgentForge: AI narration is ready for YouTube draft "+row["title"][:160])
+ return {"id":draft_id,"voice_ready":True,"captions_ready":True,"audio_bytes":len(audio),
+         "message":"Narration and draft SRT captions created. Caption timing is estimated; review before publishing."}
+
+@router.get("/drafts/{draft_id}/captions")
+def draft_captions(draft_id:str):
+ from fastapi.responses import FileResponse
+ with conn() as c: row=c.execute("SELECT captions_path FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
+ if not row or not row["captions_path"]: raise HTTPException(404,"Captions are not available.")
+ p=Path(row["captions_path"]).resolve()
+ if p.parent!=VIDEO_DIR or not p.is_file(): raise HTTPException(404,"Caption file unavailable.")
+ return FileResponse(p,media_type="application/x-subrip",filename=draft_id+".srt")
+
+async def save_rendered_video(draft_id:str,output,row):
+ url=output[0] if isinstance(output,list) and output else output
+ if isinstance(url,dict): url=url.get("url") or url.get("video")
+ if not isinstance(url,str) or not url.startswith("https://"): raise HTTPException(502,"Video provider returned an invalid output URL.")
+ VIDEO_DIR.mkdir(parents=True,exist_ok=True)
+ path=VIDEO_DIR/(draft_id+".mp4")
+ async with httpx.AsyncClient(timeout=240,follow_redirects=True) as h:
+  video=await h.get(url)
+ if video.status_code>=400 or b"ftyp" not in video.content[:64]: raise HTTPException(502,"Provider output was not a valid MP4 video.")
+ if len(video.content)>500_000_000: raise HTTPException(502,"Rendered video exceeded the 500 MB safety limit.")
+ path.write_bytes(video.content)
+ if row["voice_path"]:
+  if not Path(row["voice_path"]).is_file(): raise HTTPException(502,"The saved narration file is missing; regenerate the voice track.")
+  if not shutil.which("ffmpeg"): raise HTTPException(503,"FFmpeg is required to combine narration with the generated video.")
+  muxed=VIDEO_DIR/(draft_id+".mux.mp4")
+  try:
+   result=subprocess.run(["ffmpeg","-y","-i",str(path),"-i",row["voice_path"],"-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(muxed)],capture_output=True,text=True,timeout=240)
+   if result.returncode!=0 or not muxed.is_file(): raise HTTPException(502,"FFmpeg could not combine the narration and video. Check the generated media files.")
+   os.replace(muxed,path)
+  except subprocess.TimeoutExpired:
+   raise HTTPException(504,"Video and narration processing timed out.")
+ with conn() as c:
+  c.execute("UPDATE yt_drafts SET video_path=?,status='ready_for_approval',render_prediction_url=NULL,error=NULL WHERE id=?",(str(path),draft_id))
+ await send_telegram_message("AgentForge: rendered video is ready for your approval: "+row["title"][:160])
+ return {"id":draft_id,"status":"ready_for_approval","bytes":path.stat().st_size,"has_voice":bool(row["voice_path"])}
+
 @router.post("/drafts/{draft_id}/render")
 async def render_draft(draft_id:str):
  video_key,video_model,video_provider=video_config()
  if video_provider!="replicate" or not (video_key and video_model): raise HTTPException(503,"Open Connect API and configure Replicate video credentials.")
+ if "/" not in video_model: raise HTTPException(503,"Replicate model slug must use owner/model format.")
+ with conn() as c:
+  row=c.execute("SELECT * FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
+  if not row: raise HTTPException(404,"Draft not found.")
+  changed=c.execute("UPDATE yt_drafts SET status='rendering',error=NULL WHERE id=? AND status='script_ready'",(draft_id,))
+  if changed.rowcount!=1: raise HTTPException(409,"This draft is not available to start a new render.")
+ try:
+  async with httpx.AsyncClient(timeout=75) as h:
+   response=await h.post("https://api.replicate.com/v1/models/"+video_model+"/predictions",
+    headers={"Authorization":"Bearer "+video_key,"Prefer":"wait=60","Content-Type":"application/json"},
+    json={"input":{"prompt":row["script"]}})
+  if response.status_code>=400: raise HTTPException(502,"Video provider rejected the render request. Check model input schema and account limits.")
+  prediction=response.json()
+  if prediction.get("status")=="succeeded" and prediction.get("output"):
+   return await save_rendered_video(draft_id,prediction["output"],row)
+  prediction_url=prediction.get("urls",{}).get("get")
+  if not prediction_url: raise HTTPException(502,"Video provider did not return a prediction status URL.")
+  with conn() as c: c.execute("UPDATE yt_drafts SET render_prediction_url=? WHERE id=?",(prediction_url,draft_id))
+  return {"id":draft_id,"status":"rendering","message":"Video rendering has started. Use Check render status to retrieve the finished video."}
+ except HTTPException as exc:
+  with conn() as c: c.execute("UPDATE yt_drafts SET status='render_failed',error=? WHERE id=?",(str(exc.detail)[:500],draft_id))
+  raise
+ except httpx.RequestError:
+  with conn() as c: c.execute("UPDATE yt_drafts SET status='render_failed',error='Video provider request failed.' WHERE id=?",(draft_id,))
+  raise HTTPException(502,"Could not reach the video provider.")
+
+@router.get("/drafts/{draft_id}/render-status")
+async def render_status(draft_id:str):
+ video_key,video_model,video_provider=video_config()
+ if not video_key: raise HTTPException(503,"Configure Replicate in Connect API.")
  with conn() as c: row=c.execute("SELECT * FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
  if not row: raise HTTPException(404,"Draft not found.")
- # Replicate model slug format: owner/model. It returns prediction output, which may be a video URL.
- if "/" not in video_model: raise HTTPException(503,"Replicate model slug must use owner/model format.")
- async with httpx.AsyncClient(timeout=60) as h:
-  r=await h.post("https://api.replicate.com/v1/models/"+video_model+"/predictions",headers={"Authorization":"Bearer "+video_key,"Prefer":"wait=60","Content-Type":"application/json"},json={"input":{"prompt":row["script"]}})
- if r.status_code>=400: raise HTTPException(502,"Video provider rejected the render request. Check model input schema and account limits.")
- pred=r.json()
- if pred.get("status") not in ("succeeded",) or not pred.get("output"):
-  return {"id":draft_id,"render_status":pred.get("status","starting"),"prediction_url":pred.get("urls",{}).get("get"),"message":"Render is still processing. Poll the prediction URL or retry after provider completion."}
- output=pred["output"]; url=output[0] if isinstance(output,list) else output
- if not isinstance(url,str) or not url.startswith("https://"): raise HTTPException(502,"Video provider returned an invalid output URL.")
- VIDEO_DIR.mkdir(parents=True,exist_ok=True); path=VIDEO_DIR/(draft_id+".mp4")
- async with httpx.AsyncClient(timeout=180,follow_redirects=True) as h:
-  v=await h.get(url)
- if v.status_code>=400 or not v.content.startswith(b"\x00\x00\x00") and b"ftyp" not in v.content[:32]: raise HTTPException(502,"Provider output was not a valid MP4 video.")
- if len(v.content)>500_000_000: raise HTTPException(502,"Rendered video exceeded the 500 MB safety limit.")
- path.write_bytes(v.content)
- with conn() as c: c.execute("UPDATE yt_drafts SET video_path=?,status='ready_for_approval' WHERE id=?",(str(path),draft_id))
- return {"id":draft_id,"status":"ready_for_approval","bytes":len(v.content)}
+ if row["status"]!="rendering" or not row["render_prediction_url"]:
+  return {"id":draft_id,"status":row["status"],"has_video":bool(row["video_path"])}
+ try:
+  async with httpx.AsyncClient(timeout=45) as h:
+   response=await h.get(row["render_prediction_url"],headers={"Authorization":"Bearer "+video_key})
+  if response.status_code>=400: raise HTTPException(502,"Could not retrieve the video render status.")
+  prediction=response.json()
+  if prediction.get("status") in ("starting","processing"):
+   return {"id":draft_id,"status":"rendering","message":"Video is still rendering. Check again shortly."}
+  if prediction.get("status")!="succeeded" or not prediction.get("output"):
+   with conn() as c: c.execute("UPDATE yt_drafts SET status='render_failed',error='Video provider reported a failed render.',render_prediction_url=NULL WHERE id=?",(draft_id,))
+   await send_telegram_message("AgentForge: video rendering failed for draft "+row["title"][:160])
+   return {"id":draft_id,"status":"render_failed","message":"Video provider reported a failed render. Review the model settings and try a new draft."}
+  return await save_rendered_video(draft_id,prediction["output"],row)
+ except httpx.RequestError:
+  raise HTTPException(502,"Could not reach the video provider to check render status.")
 
 @router.get("/drafts")
 def drafts():
