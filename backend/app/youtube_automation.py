@@ -343,8 +343,20 @@ async def render_status(draft_id:str):
 
 @router.get("/drafts")
 def drafts():
- with conn() as c: rows=c.execute("SELECT id,title,description,script,topic,status,privacy,created,published_url,published_at,error,video_path FROM yt_drafts ORDER BY created DESC LIMIT 100").fetchall()
- return [{**{k:r[k] for k in r.keys() if k!="video_path"},"has_video":bool(r["video_path"])} for r in rows]
+ with conn() as c:
+  records=c.execute("SELECT id,title,description,script,topic,status,privacy,created,published_url,published_at,error,video_path,voice_path,captions_path FROM yt_drafts ORDER BY created DESC LIMIT 100").fetchall()
+ return [{**{k:r[k] for k in r.keys() if k not in ("video_path","voice_path","captions_path")},
+          "has_video":bool(r["video_path"]),"has_voice":bool(r["voice_path"]),
+          "has_captions":bool(r["captions_path"])} for r in records]
+
+@router.get("/drafts/{draft_id}/voice")
+def draft_voice(draft_id:str):
+ from fastapi.responses import FileResponse
+ with conn() as c: row=c.execute("SELECT voice_path FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
+ if not row or not row["voice_path"]: raise HTTPException(404,"Narration is not available.")
+ p=Path(row["voice_path"]).resolve()
+ if p.parent!=VIDEO_DIR or not p.is_file(): raise HTTPException(404,"Narration file unavailable.")
+ return FileResponse(p,media_type="audio/mpeg",filename=draft_id+".mp3")
 @router.get("/drafts/{draft_id}/video")
 def draft_video(draft_id:str):
  from fastapi.responses import FileResponse
@@ -358,18 +370,34 @@ async def approve_publish(draft_id:str,req:Approve):
  if req.confirmed is not True: raise HTTPException(400,"Explicit approval is required.")
  with conn() as c: row=c.execute("SELECT * FROM yt_drafts WHERE id=?",(draft_id,)).fetchone()
  if not row: raise HTTPException(404,"Draft not found.")
- if row["status"]!="ready_for_approval" or not row["video_path"] or not Path(row["video_path"]).is_file(): raise HTTPException(409,"Only a fully rendered video can be approved for upload.")
+ if row["status"]!="ready_for_approval" or not row["video_path"] or not Path(row["video_path"]).is_file():
+  raise HTTPException(409,"Only a fully rendered video awaiting approval can be uploaded.")
  tok=await access_token()
- metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"\n\n"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
- async with httpx.AsyncClient(timeout=60) as h:
-  init=await h.post("https://www.googleapis.com/upload/youtube/v3/videos",params={"uploadType":"resumable","part":"snippet,status"},headers={"Authorization":"Bearer "+tok,"Content-Type":"application/json; charset=UTF-8","X-Upload-Content-Type":"video/mp4"},json=metadata)
- if init.status_code>=400: raise HTTPException(502,"YouTube could not start the upload. Check channel verification, API quota and upload permissions.")
- upload_url=init.headers.get("Location")
- if not upload_url: raise HTTPException(502,"YouTube did not provide an upload session.")
- file=Path(row["video_path"])
- async with httpx.AsyncClient(timeout=600) as h:
-  up=await h.put(upload_url,content=file.read_bytes(),headers={"Content-Type":"video/mp4","Content-Length":str(file.stat().st_size)})
- if up.status_code not in (200,201): raise HTTPException(502,"YouTube upload failed. The draft remains saved; check upload status before retrying to avoid duplicates.")
- vid=up.json()["id"]; link="https://www.youtube.com/watch?v="+vid
- with conn() as c: c.execute("UPDATE yt_drafts SET status='published',privacy=?,published_url=?,published_at=?,error=NULL WHERE id=?",(req.privacy,now(),link,draft_id))
- return {"status":"published","video_id":vid,"url":link,"privacy":req.privacy}
+ metadata={"snippet":{"title":row["title"][:100],"description":row["description"]+"\\n\\n"+row["script"][:3500],"categoryId":"28"},"status":{"privacyStatus":req.privacy,"selfDeclaredMadeForKids":False}}
+ with conn() as c:
+  changed=c.execute("UPDATE yt_drafts SET status='uploading',error=NULL WHERE id=? AND status='ready_for_approval'",(draft_id,))
+  if changed.rowcount!=1: raise HTTPException(409,"This draft is already being uploaded or has already been processed.")
+ try:
+  async with httpx.AsyncClient(timeout=60) as h:
+   init=await h.post("https://www.googleapis.com/upload/youtube/v3/videos",params={"uploadType":"resumable","part":"snippet,status"},headers={"Authorization":"Bearer "+tok,"Content-Type":"application/json; charset=UTF-8","X-Upload-Content-Type":"video/mp4"},json=metadata)
+  if init.status_code>=400:
+   with conn() as c: c.execute("UPDATE yt_drafts SET status='ready_for_approval',error='YouTube rejected upload initialization.' WHERE id=? AND status='uploading'",(draft_id,))
+   raise HTTPException(502,"YouTube could not start the upload. Check channel verification, API quota and upload permissions.")
+  upload_url=init.headers.get("Location")
+  if not upload_url:
+   with conn() as c: c.execute("UPDATE yt_drafts SET status='ready_for_approval',error='YouTube did not return an upload session.' WHERE id=? AND status='uploading'",(draft_id,))
+   raise HTTPException(502,"YouTube did not provide an upload session.")
+  file=Path(row["video_path"])
+  async with httpx.AsyncClient(timeout=600) as h:
+   upload=await h.put(upload_url,content=file.read_bytes(),headers={"Content-Type":"video/mp4","Content-Length":str(file.stat().st_size)})
+  if upload.status_code not in (200,201):
+   with conn() as c: c.execute("UPDATE yt_drafts SET status='upload_unknown',error='Upload response was inconclusive; verify the channel before retrying.' WHERE id=? AND status='uploading'",(draft_id,))
+   raise HTTPException(502,"YouTube upload outcome is uncertain. Check YouTube Studio before attempting another upload; AgentForge has blocked automatic retries to prevent duplicates.")
+  video_id=upload.json()["id"]; link="https://www.youtube.com/watch?v="+video_id
+  with conn() as c:
+   c.execute("UPDATE yt_drafts SET status='published',privacy=?,published_url=?,published_at=?,error=NULL WHERE id=? AND status='uploading'",(req.privacy,link,now(),draft_id))
+  await send_telegram_message("AgentForge: approved YouTube video published: "+link)
+  return {"status":"published","video_id":video_id,"url":link,"privacy":req.privacy}
+ except httpx.RequestError:
+  with conn() as c: c.execute("UPDATE yt_drafts SET status='upload_unknown',error='Network failure during upload; verify YouTube Studio before retrying.' WHERE id=? AND status='uploading'",(draft_id,))
+  raise HTTPException(502,"Upload outcome is uncertain after a network failure. Check YouTube Studio before retrying to prevent duplicate uploads.")
