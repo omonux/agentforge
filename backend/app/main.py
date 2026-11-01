@@ -605,3 +605,7 @@ app.include_router(omonux_integrations_router)
 # Read-only exchange account checks are restricted to exchange testnets.
 from .omonux_exchange_testnet import router as omonux_exchange_router
 app.include_router(omonux_exchange_router)
+
+# Read-only production account checks; no live order endpoints are exposed.
+from .omonux_live_account import router as omonux_live_account_router
+app.include_router(omonux_live_account_router)
