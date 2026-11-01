@@ -300,3 +300,29 @@ def test_omonux_daily_loss_gate_includes_unrealized_open_position_loss(tmp_path,
             for event in events
         )
 
+def test_omonux_paper_portfolio_reports_mark_to_market_pnl(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "paper-mark.db")
+
+    async def market(symbol, interval="30m", limit=120):
+        return [
+            {"time": i, "open": 120, "high": 121, "low": 119, "close": 120, "volume": 10}
+            for i in range(60)
+        ]
+
+    monkeypatch.setattr(main, "fetch_candles", market)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        with main.db() as conn:
+            conn.execute(
+                "INSERT INTO paper_trades VALUES(?,?,?,?,?,?)",
+                ("paper-buy-1", "BTCUSDT", "buy", 2, 100, main.stamp()),
+            )
+        response = client.get("/api/v1/trading/paper/portfolio")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mark_to_market_complete"] is True
+        assert data["realized_pnl"] == 0
+        assert data["unrealized_pnl"] == 40
+        assert data["total_pnl"] == 40
+        assert data["positions"][0]["mark_price"] == 120
+
