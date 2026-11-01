@@ -136,3 +136,10 @@ async def run_pending_workflows():
  if claimed.rowcount!=1: return True
  await execute_workflow_run(dict(run))
  return True
+
+
+def recover_interrupted_runs():
+ """Mark jobs interrupted by a process restart; never replay uncertain external side effects."""
+ ensure_runs()
+ with db() as c:
+  c.execute("UPDATE workflow_runs SET status='interrupted',error='Worker restarted before this run completed; review its action history before creating a new run.',updated=? WHERE status='running'",(stamp(),))
