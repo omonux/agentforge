@@ -42,11 +42,11 @@ SERVICES = [
         {"name":"elevenlabs_model","label":"Voice model","kind":"text","required":False,"help":"Default: eleven_multilingual_v2"}]},
     {"id":"payments","name":"Payments","group":"Business services","description":"Paystack and OPay hosted checkout. Keep billing disabled until merchant sandbox verification is complete.","testable":True,"fields":[
         {"name":"paystack_secret_key","label":"Paystack secret key","kind":"secret","required":False,"help":"Use a test key for sandbox validation; never enable live billing until reviewed."},
-        {"name":"paystack_public_key","label":"Paystack public key","kind":"secret","required":False,"help":"Public checkout identifier; optional for the current hosted flow."},
+        {"name":"paystack_public_key","label":"Paystack public key","kind":"secret","required":False,"help":"Public checkout identifier; optional for the current hosted flow."},\n        {"name":"paystack_pro_monthly_plan_code","label":"Paystack Pro plan code","kind":"text","required":False,"help":"Optional recurring plan code."},\n        {"name":"paystack_business_monthly_plan_code","label":"Paystack Business plan code","kind":"text","required":False,"help":"Optional recurring plan code."},
         {"name":"opay_public_key","label":"OPay public key","kind":"secret","required":False,"help":"Merchant credential from your approved OPay account."},
         {"name":"opay_secret_key","label":"OPay secret key","kind":"secret","required":False,"help":"Keep private. OPay signing must be validated against your merchant docs."},
         {"name":"opay_merchant_id","label":"OPay merchant ID","kind":"text","required":False,"help":"Merchant identifier supplied by OPay."},
-        {"name":"opay_api_base_url","label":"OPay API base URL","kind":"text","required":False,"help":"Use the sandbox URL until merchant approval."}]},
+        {"name":"opay_api_base_url","label":"OPay API base URL","kind":"text","required":False,"help":"Use the sandbox URL until merchant approval."},\n        {"name":"opay_country","label":"OPay country code","kind":"text","required":False,"help":"Default: NG."},\n        {"name":"opay_currency","label":"OPay currency","kind":"text","required":False,"help":"Default: NGN."}]},
     {"id":"trading","name":"Exchange Credentials (Restricted)","group":"Business services","description":"Credentials are stored encrypted. This does not turn on live trading; use testnet and keep live execution disabled.","testable":False,"fields":[
         {"name":"binance_api_key","label":"Binance testnet API key","kind":"secret","required":False,"help":"Use testnet credentials with withdrawals disabled."},
         {"name":"binance_api_secret","label":"Binance testnet API secret","kind":"secret","required":False,"help":"Never use a withdrawal-enabled key."},
@@ -62,9 +62,9 @@ ENV_FALLBACKS = {
     "youtube_redirect_uri":"YOUTUBE_REDIRECT_URI","youtube_region":"YOUTUBE_REGION",
     "telegram_bot_token":"","telegram_chat_id":"",
     "elevenlabs_api_key":"","elevenlabs_voice_id":"","elevenlabs_model":"",
-    "paystack_secret_key":"PAYSTACK_SECRET_KEY","paystack_public_key":"",
+    "paystack_secret_key":"PAYSTACK_SECRET_KEY","paystack_public_key":"",\n    "paystack_pro_monthly_plan_code":"PAYSTACK_PRO_MONTHLY_PLAN_CODE","paystack_business_monthly_plan_code":"PAYSTACK_BUSINESS_MONTHLY_PLAN_CODE",
     "opay_public_key":"OPAY_PUBLIC_KEY","opay_secret_key":"OPAY_SECRET_KEY",
-    "opay_merchant_id":"OPAY_MERCHANT_ID","opay_api_base_url":"OPAY_API_BASE_URL",
+    "opay_merchant_id":"OPAY_MERCHANT_ID","opay_api_base_url":"OPAY_API_BASE_URL",\n    "opay_country":"OPAY_COUNTRY","opay_currency":"OPAY_CURRENCY",
     "binance_api_key":"","binance_api_secret":"","bybit_api_key":"","bybit_api_secret":"",
 }
 
