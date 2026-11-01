@@ -4,12 +4,16 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from .omonux_integrations import secret_or_env
 
 router = APIRouter(prefix="/api/v1/images", tags=["Image AI"])
-KEY = os.getenv("IMAGE_API_KEY", "")
 PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").lower()
-MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1")
-BASE = os.getenv("IMAGE_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+
+def image_config():
+    key = secret_or_env("image_api_key", "IMAGE_API_KEY")
+    model = secret_or_env("image_model", "IMAGE_MODEL", "gpt-image-1")
+    base = secret_or_env("image_base_url", "IMAGE_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    return key, model, base
 DB = Path(os.getenv("DATABASE_PATH", "./agentforge.db"))
 STORE = Path(os.getenv("IMAGE_STORAGE_DIR", "./storage/generated_images")).resolve()
 MAX_BYTES = int(os.getenv("IMAGE_MAX_UPLOAD_BYTES", "12000000"))
@@ -32,8 +36,9 @@ class GenerateRequest(BaseModel):
 
 @router.get("/status")
 def image_status():
-    return {"configured": bool(KEY) and PROVIDER == "openai", "provider": PROVIDER,
-            "model": MODEL, "key_present": bool(KEY), "max_batch": 4}
+    key, model, base = image_config()
+    return {"configured": bool(key) and PROVIDER == "openai", "provider": PROVIDER,
+            "model": model, "key_present": bool(key), "max_batch": 4}
 
 @router.get("/assets")
 def image_assets():
@@ -44,16 +49,17 @@ def image_assets():
 async def generate_images(req: GenerateRequest):
     if PROVIDER != "openai":
         raise HTTPException(503, "This build currently supports IMAGE_PROVIDER=openai.")
-    if not KEY:
-        raise HTTPException(503, "Image generation is not configured. Set IMAGE_API_KEY in the backend environment.")
+    key, model, base = image_config()
+    if not key:
+        raise HTTPException(503, "Image generation is not configured. Open Connect API and add an image provider key.")
     STORE.mkdir(parents=True, exist_ok=True)
     results = []
-    payload = {"model": MODEL, "prompt": req.prompt, "size": req.size,
+    payload = {"model": model, "prompt": req.prompt, "size": req.size,
                "quality": req.quality, "n": req.count}
     try:
         async with httpx.AsyncClient(timeout=180) as client:
-            response = await client.post(BASE + "/images/generations",
-                headers={"Authorization": "Bearer " + KEY},
+            response = await client.post(base + "/images/generations",
+                headers={"Authorization": "Bearer " + key},
                 json=payload)
         if response.status_code >= 400:
             # Never return provider response bodies: they can contain sensitive diagnostics.
@@ -75,8 +81,8 @@ async def generate_images(req: GenerateRequest):
                 created = datetime.now(timezone.utc).isoformat()
                 revised = item.get("revised_prompt")
                 c.execute("INSERT INTO image_assets VALUES(?,?,?,?,?,?,?,?)",
-                    (ident, req.prompt, MODEL, req.size, req.quality, filename, created, revised))
-                results.append({"id": ident, "prompt": req.prompt, "model": MODEL,
+                    (ident, req.prompt, model, req.size, req.quality, filename, created, revised))
+                results.append({"id": ident, "prompt": req.prompt, "model": model,
                     "size": req.size, "quality": req.quality, "created": created,
                     "revised_prompt": revised})
             c.commit()
