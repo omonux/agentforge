@@ -272,8 +272,8 @@ async def create_checkout(data: CheckoutInput):
             merchant_id = secret_or_env("opay_merchant_id","OPAY_MERCHANT_ID")
             if not public_key or not merchant_id:
                 raise HTTPException(503, "OPay merchant public key and merchant ID are not configured.")
-            country = os.getenv("OPAY_COUNTRY", "NG").upper()
-            currency = os.getenv("OPAY_CURRENCY", "NGN").upper()
+            country = secret_or_env("opay_country","OPAY_COUNTRY","NG").upper()
+            currency = secret_or_env("opay_currency","OPAY_CURRENCY","NGN").upper()
             if country != "NG" or currency != "NGN":
                 raise HTTPException(503, "OPay checkout is configured for Nigeria NGN only.")
             api_base = secret_or_env("opay_api_base_url","OPAY_API_BASE_URL","https://sandboxapi.opaycheckout.com").rstrip("/")
@@ -393,7 +393,7 @@ def _paystack_subscription_event(event_name: str, data: dict):
 @router.post("/webhooks/paystack")
 async def paystack_webhook(request: Request):
     init_billing_db()
-    secret = os.getenv("PAYSTACK_SECRET_KEY", "")
+    secret = secret_or_env("paystack_secret_key","PAYSTACK_SECRET_KEY")
     raw = await request.body()
     if not secret or not _paystack_signature_ok(raw, request.headers.get("x-paystack-signature"), secret):
         raise HTTPException(401, "Invalid Paystack webhook signature.")
@@ -446,8 +446,8 @@ async def opay_webhook(request: Request):
     if not row:
         return {"received": True}
     # Confirm the callback independently using OPay's transaction-status API.
-    merchant_id = os.getenv("OPAY_MERCHANT_ID", "")
-    api_base = os.getenv("OPAY_API_BASE_URL", "https://sandboxapi.opaycheckout.com").rstrip("/")
+    merchant_id = secret_or_env("opay_merchant_id","OPAY_MERCHANT_ID")
+    api_base = secret_or_env("opay_api_base_url","OPAY_API_BASE_URL","https://sandboxapi.opaycheckout.com").rstrip("/")
     country = os.getenv("OPAY_COUNTRY", "NG").upper()
     currency = os.getenv("OPAY_CURRENCY", "NGN").upper()
     query = {"reference": reference, "country": country}
