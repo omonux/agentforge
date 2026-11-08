@@ -64,3 +64,14 @@ services:
         sync: false
       - key: OPAY_MERCHANT_ID
         sync: false
+
+      # Guarded real-money Spot execution. Explicitly enable only after private API keys,
+      # withdrawal-disabled permissions, IP restrictions and risk limits are reviewed.
+      - key: LIVE_TRADING_ENABLED
+        value: "false"
+      - key: BYBIT_LIVE_TRADING_ENABLED
+        value: "false"
+      - key: LIVE_MAX_ORDER_NOTIONAL_USDT
+        value: "25"
+      - key: LIVE_MAX_DAILY_NOTIONAL_USDT
+        value: "100"

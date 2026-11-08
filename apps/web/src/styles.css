@@ -73,3 +73,31 @@
 .omx-scan-note{display:block;color:#9ba9c0;font-size:9px;line-height:1.6;margin-top:12px}.omx-scan-progress{display:flex;align-items:center;gap:7px;margin:13px 0;color:#c4b9ff;font-size:10px}.omx-scan-progress span{width:6px;height:6px;border-radius:50%;background:#a99bff;animation:omx-pulse 1s ease-in-out infinite}.omx-scan-progress span:nth-child(2){animation-delay:.2s}.omx-scan-progress span:nth-child(3){animation-delay:.4s}.omx-spin{animation:omx-spin 1s linear infinite}@keyframes omx-spin{to{transform:rotate(360deg)}}
 @media(max-width:760px){.omx-quantum-hero{align-items:flex-start;flex-wrap:wrap}.omx-quantum-live{margin-left:84px}.omx-market-list{grid-template-columns:1fr}.omx-market-row{grid-template-columns:1fr .5fr .5fr 1fr auto}.omx-universe-stats{grid-template-columns:repeat(2,1fr)}}
 @media(prefers-reduced-motion:reduce){.omx-python-orbit,.omx-quantum-live i,.omx-scan-progress span,.omx-spin{animation:none}}
+
+/* OMONUX premium gold terminal accents */
+:root{--gold:#d7ad5b;--gold-bright:#f3d58b;--gold-muted:#9b7840;--purple:#8171d7}
+.primary{background:linear-gradient(135deg,#f0d38a 0%,#c18b36 48%,#8f6428 100%);color:#17120a;box-shadow:0 5px 18px #c18b3626}
+.primary:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.secondary:hover{border-color:#b58a45;color:#f3d58b}
+.nav.active,.nav:hover{background:linear-gradient(100deg,#3a2d1b,#1d2230);color:#f4d99b}
+.brand .mark{border-color:#d3a34f;box-shadow:0 0 22px #d3a34f35}
+.welcome small,.tradinghero small,.modalhead small,.eyebrow{color:#e1bd70}
+.stat>div,.agent>small,.quick svg:first-child,.link{color:#d8b36a}
+.agent:hover{border-color:#b88b43}
+.moduleintro h2,.portfoliohead h3,.panel h3{letter-spacing:.1px}
+.tradinghero{background:linear-gradient(110deg,#332719,#171e2b 72%);border-color:#70552e}
+.tradinghero>svg{color:#e2bd70}
+.tradinghero>b{color:#f0d28e;background:#47371f}
+.omx-strategy-lab,.omx-council{border-color:#4c3b24;box-shadow:0 12px 34px #0002}
+.omx-strategy-lab .portfoliohead h3{display:flex;align-items:center;gap:8px;color:#f1d79d}
+.omx-strategy-lab .portfoliohead h3 svg{color:#e0b967}
+.omx-strategy-lab .status{background:#3a2c1b;color:#edce8b;border:1px solid #6d512c}
+.research-report{margin-top:18px}
+.omx-strategy-lab .council-verdict{border-radius:10px}
+.omx-strategy-lab .council-verdict.approved{border-color:#8e6a34;background:linear-gradient(110deg,#382d1b,#1b2630)}
+.omx-strategy-lab .council-verdict.blocked{border-color:#5b3b3e}
+.omx-strategy-lab .stat{border-color:#453722;background:linear-gradient(145deg,#1b1b20,#171b25)}
+.omx-strategy-lab .stat strong{color:#f0d18b}
+.omx-strategy-lab .taskrow{border-color:#403321}
+.omx-strategy-lab .guard{line-height:1.65}
+@media(max-width:600px){.omx-strategy-lab .portfoliohead{align-items:flex-start;gap:10px}}
