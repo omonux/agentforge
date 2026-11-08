@@ -56,3 +56,31 @@
 .council-vote p{font-size:10px;line-height:1.6;color:#bac5d7;margin:9px 0 7px}
 .council-vote small{font-size:9px;color:#8190a7}
 @media(max-width:720px){.council-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.council-votes{grid-template-columns:1fr}.council-verdict{align-items:flex-start}}
+
+/* OMONUX premium gold terminal accents */
+:root{--gold:#d7ad5b;--gold-bright:#f3d58b;--gold-muted:#9b7840;--purple:#8171d7}
+.primary{background:linear-gradient(135deg,#f0d38a 0%,#c18b36 48%,#8f6428 100%);color:#17120a;box-shadow:0 5px 18px #c18b3626}
+.primary:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.secondary:hover{border-color:#b58a45;color:#f3d58b}
+.nav.active,.nav:hover{background:linear-gradient(100deg,#3a2d1b,#1d2230);color:#f4d99b}
+.brand .mark{border-color:#d3a34f;box-shadow:0 0 22px #d3a34f35}
+.welcome small,.tradinghero small,.modalhead small,.eyebrow{color:#e1bd70}
+.stat>div,.agent>small,.quick svg:first-child,.link{color:#d8b36a}
+.agent:hover{border-color:#b88b43}
+.moduleintro h2,.portfoliohead h3,.panel h3{letter-spacing:.1px}
+.tradinghero{background:linear-gradient(110deg,#332719,#171e2b 72%);border-color:#70552e}
+.tradinghero>svg{color:#e2bd70}
+.tradinghero>b{color:#f0d28e;background:#47371f}
+.omx-strategy-lab,.omx-council{border-color:#4c3b24;box-shadow:0 12px 34px #0002}
+.omx-strategy-lab .portfoliohead h3{display:flex;align-items:center;gap:8px;color:#f1d79d}
+.omx-strategy-lab .portfoliohead h3 svg{color:#e0b967}
+.omx-strategy-lab .status{background:#3a2c1b;color:#edce8b;border:1px solid #6d512c}
+.research-report{margin-top:18px}
+.omx-strategy-lab .council-verdict{border-radius:10px}
+.omx-strategy-lab .council-verdict.approved{border-color:#8e6a34;background:linear-gradient(110deg,#382d1b,#1b2630)}
+.omx-strategy-lab .council-verdict.blocked{border-color:#5b3b3e}
+.omx-strategy-lab .stat{border-color:#453722;background:linear-gradient(145deg,#1b1b20,#171b25)}
+.omx-strategy-lab .stat strong{color:#f0d18b}
+.omx-strategy-lab .taskrow{border-color:#403321}
+.omx-strategy-lab .guard{line-height:1.65}
+@media(max-width:600px){.omx-strategy-lab .portfoliohead{align-items:flex-start;gap:10px}}
