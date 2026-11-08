@@ -128,7 +128,23 @@ async def ask(agent,prompt):
   async with httpx.AsyncClient(timeout=90) as client:
    r=await client.post(base+"/chat/completions",headers={"Authorization":"Bearer "+key},json={"model":model,"temperature":0.3,"messages":[{"role":"system","content":f"You are {name} in AgentForge. {policy} Be useful, honest and concise."},{"role":"user","content":prompt}]})
    r.raise_for_status(); return r.json()["choices"][0]["message"]["content"]
- except httpx.HTTPStatusError as e: raise HTTPException(502,f"AI provider HTTP {e.response.status_code}.")
+ except httpx.HTTPStatusError as e:
+  status=e.response.status_code
+  code=None
+  try:
+   payload=e.response.json()
+   err=payload.get("error",{}) if isinstance(payload,dict) else {}
+   if isinstance(err,dict): code=err.get("code") or err.get("type")
+  except (ValueError,TypeError): pass
+  if status==429:
+   if code=="insufficient_quota": detail="OpenAI API quota exhausted or billing limit reached. Check API billing, project budget and available credits in the OpenAI platform."
+   elif code in ("rate_limit_exceeded","tokens"): detail="OpenAI API rate limit reached. Wait before retrying and check your project rate limits."
+   else: detail="AI provider HTTP 429: quota, billing or rate limit. Check your API account usage and limits."
+   raise HTTPException(502,detail)
+  if status==401: raise HTTPException(502,"AI provider rejected the API key (401). Check Connect API credentials.")
+  if status==403: raise HTTPException(502,"AI provider denied access (403). Check project permissions and model access.")
+  if status==404: raise HTTPException(502,"AI provider model or endpoint not found (404). Check Connect API model and base URL.")
+  raise HTTPException(502,f"AI provider HTTP {status}. Check Connect API settings.")
  except Exception: raise HTTPException(502,"AI provider request failed or returned an invalid response.")
 @app.get("/health")
 def health():
