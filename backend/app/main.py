@@ -715,7 +715,7 @@ async def workspace_assistant_command(req:WorkspaceAssistantRequest):
   return {"kind":"result","message":"Paper-trading evaluation finished. Review the audit events and portfolio for the decision.","data":{"actions":result.get("actions",[])}}
  if re.search(r"\\b(trad|crypto|paper|portfolio|position|council|scanner|market|profit|pnl)",q):
   status=auto_trade_status()
-  portfolio=auto_trade_portfolio()
+  portfolio=await auto_paper_portfolio()
   events=auto_trade_events()
   recent=events[:3] if isinstance(events,list) else []
   return {"kind":"result","message":"Omonux Trading is "+("running" if status["running"] else "stopped")+". Mode: paper only. The 12-agent council evaluates qualifying signals from up to 50 scanned markets. The engine does not guarantee trades or profits.","data":{"settings":status["settings"],"running":status["running"],"portfolio":portfolio,"recent_events":recent}}
