@@ -124,6 +124,7 @@ async def _run_specialist(
     name: str,
     task: str,
     evidence: dict[str, Any],
+    semaphore: asyncio.Semaphore,
 ) -> dict[str, Any]:
     system = (
         f"You are the {name}, one independent specialist in a twelve-agent crypto market research council. "
@@ -134,7 +135,8 @@ async def _run_specialist(
         "reason (one concise paragraph), evidence (array of short observed facts), veto (boolean). "
         "Set veto=true only for a critical risk that should block even a majority vote."
     )
-    response = await client.post(
+    async with semaphore:
+        response = await client.post(
         base_url.rstrip("/") + "/chat/completions",
         headers={"Authorization": "Bearer " + api_key},
         json={
@@ -197,10 +199,11 @@ async def run_council(
         raise ValueError("The council requires at least 40 completed candles.")
     evidence = _market_evidence(symbol, timeframe, candles, signal, multi_timeframe_candles)
     timeout = httpx.Timeout(75.0, connect=10.0)
+    semaphore = asyncio.Semaphore(2)
     async with httpx.AsyncClient(timeout=timeout) as client:
         results = await asyncio.gather(
             *[
-                _run_specialist(client, base_url, api_key, model, sid, name, task, evidence)
+                _run_specialist(client, base_url, api_key, model, sid, name, task, evidence, semaphore)
                 for sid, name, task in SPECIALISTS
             ],
             return_exceptions=True,
@@ -210,7 +213,20 @@ async def run_council(
     errors: list[str] = []
     for (sid, name, _), result in zip(SPECIALISTS, results):
         if isinstance(result, BaseException):
-            errors.append(f"{sid}: {type(result).__name__}")
+            if isinstance(result, httpx.HTTPStatusError):
+                status = result.response.status_code
+                category = ""
+                try:
+                    payload = result.response.json()
+                    upstream = payload.get("error", {}) if isinstance(payload, dict) else {}
+                    code = (upstream.get("code") or upstream.get("type")) if isinstance(upstream, dict) else None
+                    if code in {"insufficient_quota", "rate_limit_exceeded", "billing_hard_limit_reached", "invalid_api_key", "model_not_found"}:
+                        category = f" ({code})"
+                except (ValueError, TypeError):
+                    pass
+                errors.append(f"{sid}: AI provider HTTP {status}{category}")
+            else:
+                errors.append(f"{sid}: {type(result).__name__}")
             votes.append({
                 "id": sid, "name": name, "stance": "HOLD", "confidence": 0,
                 "reason": "Agent unavailable; no vote was counted.", "evidence": [],
