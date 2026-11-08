@@ -665,7 +665,9 @@ async def auto_trade_run_once():
   elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(last_exit["created"])).total_seconds()/60
   if elapsed<settings["cooldown_minutes"]:
    return {"actions":actions,"blocked":"Cooldown active","cooldown_remaining_minutes":round(settings["cooldown_minutes"]-elapsed,1)}
+ council_attempted=False
  for symbol in ("BTCUSDT","ETHUSDT","SOLUSDT"):
+  if council_attempted: break
   if len(open_positions)>=settings["max_open_positions"] or entries_today>=settings["max_trades_per_day"]: break
   if any(p["symbol"]==symbol for p in open_positions): continue
   try:
@@ -674,6 +676,7 @@ async def auto_trade_run_once():
    if signal["side"]!="BUY" or signal["confidence"]<settings["min_confidence"]: continue
    # AI council is a second gate, never an execution authority. It must return
    # all 12 independent votes and meet strict consensus before paper simulation.
+   council_attempted=True
    council=await run_council(symbol,"30m",cs,signal,BASE,KEY,MODEL)
    auto_event(
     "COUNCIL_DECISION",
