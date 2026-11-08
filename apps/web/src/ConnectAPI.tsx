@@ -10,6 +10,8 @@ type Props = { onNotice?: (message: string) => void };
 export default function ConnectAPI({ onNotice }: Props) {
   const [services, setServices] = useState<Service[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [edited, setEdited] = useState<Record<string, boolean>>({});
+  const defaults: Record<string, string> = { ai_base_url: "https://api.openai.com/v1", ai_model: "gpt-4.1-mini", image_base_url: "https://api.openai.com/v1", image_model: "gpt-image-1" };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [testing, setTesting] = useState("");
@@ -32,7 +34,7 @@ export default function ConnectAPI({ onNotice }: Props) {
   useEffect(() => { void load(); }, [load]);
 
   const saveService = async (service: Service) => {
-    const entries = service.fields.map(field => [field.name, (values[field.name] || "").trim()] as const).filter(([, value]) => value.length > 0);
+    const entries = service.fields.map(field => [field.name, (values[field.name] ?? (!field.configured ? defaults[field.name] : "") ?? "").trim()] as const).filter(([name, value]) => value.length > 0 && (edited[name] || !service.fields.find(f => f.name === name)?.configured));
     if (!entries.length) { setError("Enter at least one credential before saving."); return; }
     setSaving(service.id); setError("");
     try {
@@ -48,6 +50,7 @@ export default function ConnectAPI({ onNotice }: Props) {
         entries.forEach(([name]) => { next[name] = ""; });
         return next;
       });
+      setEdited(current => { const next = { ...current }; entries.forEach(([name]) => { delete next[name]; }); return next; });
       onNotice?.(service.name + " credentials encrypted and saved.");
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Credential could not be saved."); }
@@ -113,7 +116,7 @@ export default function ConnectAPI({ onNotice }: Props) {
           {service.fields.map(field => <div className="connect-field" key={field.name}>
             <label htmlFor={field.name}>{field.label}{field.required && <i>Required</i>}</label>
             <div className="connect-input-row">
-              <input id={field.name} type={field.kind === "secret" ? "password" : "text"} autoComplete="off" value={values[field.name] || ""} onChange={e => setValues(current => ({ ...current, [field.name]: e.target.value }))} placeholder={field.configured ? "Saved securely · enter a new value to replace" : field.help} />
+              <input id={field.name} type={field.kind === "secret" ? "password" : "text"} autoComplete="off" value={values[field.name] ?? (!field.configured ? defaults[field.name] : "") ?? ""} onChange={e => { setValues(current => ({ ...current, [field.name]: e.target.value })); setEdited(current => ({ ...current, [field.name]: true })); }} placeholder={field.configured ? "Saved securely · enter a new value to replace" : field.help} />
               {field.configured && <button className="connect-icon-button" type="button" title="Remove saved credential" onClick={() => void removeField(field)}><Trash2 size={14}/></button>}
               {field.configured && <span className="connect-saved"><CheckCircle2 size={13}/> Saved</span>}
             </div>
@@ -121,7 +124,7 @@ export default function ConnectAPI({ onNotice }: Props) {
           </div>)}
         </div>
         <div className="connect-card-foot">
-          <button className="connect-save" onClick={() => void saveService(service)} disabled={saving === service.id || !encryptionReady}><Save size={14}/>{saving === service.id ? "Saving…" : "Save credentials"}</button>
+          <button className="connect-save" onClick={() => void saveService(service)} disabled={saving === service.id || !encryptionReady} title={!encryptionReady ? "Encrypted storage is not ready; contact the workspace administrator." : "Save the entered credentials"}><Save size={14}/>{saving === service.id ? "Saving…" : "Save credentials"}</button>
           {service.testable && <button className="connect-test" onClick={() => void testService(service)} disabled={testing === service.id || !service.configured}><Activity size={14}/>{testing === service.id ? "Testing…" : "Test connection"}</button>}
           {service.id === "youtube" && <button className="connect-youtube" onClick={() => void connectYouTube()} disabled={testing === "youtube" || !service.configured}><Youtube size={14}/>Connect channel</button>}
           {!service.testable && <span className="connect-manual"><Unplug size={13}/> Restricted / manual testnet setup</span>}
