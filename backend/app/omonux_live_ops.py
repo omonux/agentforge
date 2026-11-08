@@ -113,6 +113,29 @@ async def bybit_request(method: str, path: str, key: str, secret: str, params=No
         raise HTTPException(502, "Could not verify the Bybit request. Check the exchange account before retrying any order.")
 
 
+async def ensure_bybit_spot_only_permissions(key: str, secret: str) -> None:
+    # Verify the exchange's actual API-key permissions on every preview and placement.
+    info = await bybit_request("GET", "/v5/user/query-api", key, secret)
+    permissions = info.get("permissions")
+    if not isinstance(permissions, dict):
+        raise HTTPException(403, "Live orders blocked: Bybit did not return verifiable API-key permissions.")
+    if info.get("readOnly") is True:
+        raise HTTPException(403, "Live orders blocked: the Bybit API key is read-only.")
+    spot_permissions = permissions.get("Spot", [])
+    if not isinstance(spot_permissions, list) or "SpotTrade" not in spot_permissions:
+        raise HTTPException(403, "Live orders blocked: enable SpotTrade on the Bybit API key.")
+    for scope, grants in permissions.items():
+        if scope == "Spot":
+            if set(grants) - {"SpotTrade"}:
+                raise HTTPException(403, "Live orders blocked: Bybit API key has permissions beyond Spot trading.")
+        elif grants:
+            raise HTTPException(403, f"Live orders blocked: Bybit API key has additional {scope} permissions. Remove them first.")
+    # Require an exchange-side IP allowlist rather than accepting an unrestricted key.
+    ip_rules = info.get("ips")
+    if not isinstance(ip_rules, str) or not ip_rules.strip():
+        raise HTTPException(403, "Live orders blocked: add the production server IP to the Bybit API-key IP allowlist.")
+
+
 async def telegram_send(message: str):
     token, chat = read_secret("telegram_bot_token"), read_secret("telegram_chat_id")
     if not token or not chat:
