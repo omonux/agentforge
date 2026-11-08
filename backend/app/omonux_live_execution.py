@@ -183,8 +183,7 @@ async def preview_binance_order(request: PreviewRequest):
         public_binance_get("/api/v3/exchangeInfo", {"symbol": symbol}),
         public_binance_get("/api/v3/ticker/price", {"symbol": symbol}),
     )
-    if not account.get("canTrade"):
-        raise HTTPException(403, "Binance account does not have spot trading enabled.")
+    ensure_binance_spot_only(account)
     symbol_info = next((item for item in exchange_info.get("symbols", []) if item.get("symbol") == symbol), None)
     if not symbol_info or symbol_info.get("status") != "TRADING" or not symbol_info.get("isSpotTradingAllowed", False):
         raise HTTPException(400, "This symbol is not currently eligible for Binance Spot trading.")
@@ -278,8 +277,7 @@ async def place_binance_order(request: PlaceRequest):
         raise HTTPException(400, f'Type exactly "{expected}" to confirm this individual LIMIT IOC Spot order.')
     # Recheck the live account and market price immediately before placement.
     account = await binance_get("/api/v3/account", key, secret)
-    if not account.get("canTrade"):
-        raise HTTPException(403, "Binance spot trading permission is not active.")
+    ensure_binance_spot_only(account)
     ticker = await public_binance_get("/api/v3/ticker/price", {"symbol": preview["symbol"]})
     current_price = dec(ticker.get("price"), "current price")
     reference_price = dec(preview["quote_price"], "preview price")
