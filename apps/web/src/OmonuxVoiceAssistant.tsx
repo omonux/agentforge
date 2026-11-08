@@ -30,7 +30,7 @@ export default function OmonuxVoiceAssistant(){
   try{
    const response=await apiFetch(API+"/api/v1/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({agent:"research",title:"Omonux assistant: "+prompt.slice(0,90),prompt:"Respond conversationally and concisely as Omonux, the AgentForge AI assistant. Do not claim you have executed any action or placed trades. User: "+prompt})});
    const data=await response.json();
-   if(!response.ok)throw Error(typeof data.detail==="string"?data.detail:"The AI request failed.");
+   if(response.status===401){A("Your secure workspace session has expired. Sign in again to continue talking with Omonux.");E("Sign in required. Please refresh the page and sign in to AgentForge again.");return}\n   if(response.status===403){A("Your security token needs refreshing.");E("Refresh the page to renew your security token, then try again.");return}\n   if(!response.ok)throw Error(typeof data.detail==="string"?data.detail:"The AI request failed.");
    if(data.status!=="completed"||!data.result)throw Error("AI did not return a completed answer.");
    A(data.result);speak(data.result);
   }catch(e){const message=e instanceof Error?e.message:"AI connection failed.";A("I couldn't answer that request.");E(message)}
@@ -57,7 +57,7 @@ export default function OmonuxVoiceAssistant(){
  <strong style={{color:"#f6ca70",fontSize:18}}>OMONUX · Talking AI Assistant</strong>
  <p aria-live="polite" style={{margin:"8px 0",color:"#e5e7eb",whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{answer}</p>
  <small style={{color:"#a9b2c5"}}>{busy?"Thinking…":listening?"Listening…":speaking?"Speaking…":"Ask a question by voice or text"}</small>
- {error&&<p role="alert" style={{color:"#ffb4a8"}}>{error}</p>}
+ {error&&<p role="alert" style={{color:"#ffb4a8"}}>{error} {error.includes("Sign in required")&&<button type="button" className="secondary" onClick={()=>window.location.reload()}>Return to sign in</button>}</p>}
  <form onSubmit={submit} style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
  <input aria-label="Ask Omonux" placeholder="Ask Omonux a question..." value={question} onChange={e=>Q(e.target.value)} style={{flex:"1 1 180px",minWidth:0,padding:10,borderRadius:8}}/>
  <button type="submit" className="primary" disabled={busy||!question.trim()}><Send size={15}/> Ask</button>
