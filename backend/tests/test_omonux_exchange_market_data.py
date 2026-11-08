@@ -25,7 +25,7 @@ def test_bybit_normalization_sorts_and_excludes_forming_candle():
         ["0", "1", "2", "0.5", "1.5", "8", "15"],
         ["120000", "3", "4", "2", "3.5", "12", "25"],
     ]
-    candles = _normalize_bybit(rows, "1m" if False else "5m", now_ms=200000)
+    candles = _normalize_bybit(rows, "1m" if False else "5m", now_ms=360000)
     # With 5m candles, the first two rows are not yet complete at this test time.
     assert candles == []
 
