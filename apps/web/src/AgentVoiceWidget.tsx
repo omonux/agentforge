@@ -109,6 +109,12 @@ export default function AgentVoiceWidget() {
     recognitionRef.current?.stop();
     setListening(false);
     setTurns(prev => [...prev, { role: "user", text: prompt }]);
+    if (prompt.length < 3) {
+      const reply = "Please type at least three characters so I can understand your request.";
+      setTurns(prev => [...prev, { role: "assistant", text: reply }]);
+      speak(reply);
+      return;
+    }
     setBusy(true);
     try {
       const response = await apiFetch(API + "/api/v1/tasks", {
@@ -117,7 +123,13 @@ export default function AgentVoiceWidget() {
         body: JSON.stringify({ agent: "research", title: prompt.slice(0, 110) || "Voice assistant request", prompt })
       });
       const data = await response.json() as TaskReply;
-      if (!response.ok) throw new Error(readable(data.detail) || readable(data.error) || "The request could not be completed.");
+      if (!response.ok) {
+        const detail = readable(data.detail) || readable(data.error);
+        if (response.status === 429 || /AI provider HTTP 429/i.test(detail)) throw new Error("The AI provider has reached a rate or usage limit. Check your OpenAI API billing and project limits, then try again later.");
+        if (response.status === 422) throw new Error("Please enter a longer message (at least three characters).");
+        if (response.status === 401) throw new Error("Your AgentForge session has expired. Refresh the page and sign in again.");
+        throw new Error(detail || "The request could not be completed.");
+      }
       const reply = readable(data.result);
       if (data.status !== "completed" || !reply) throw new Error("The task was saved, but no completed answer was returned. Check your AgentForge task history.");
       setTurns(prev => [...prev, { role: "assistant", text: reply }]);
