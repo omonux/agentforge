@@ -118,6 +118,16 @@ def test_omonux_auto_paper_engine_controls_and_cycle(tmp_path, monkeypatch):
         ]
 
     monkeypatch.setattr(main, "fetch_candles", fake_candles)
+
+    async def fake_council(symbol, timeframe, candles, signal, base_url, api_key, model):
+        return {
+            "approved": True,
+            "decision": "PAPER_CANDIDATE",
+            "vote_counts": {"BUY": 10, "SELL": 0, "HOLD": 2},
+            "vetoes": [],
+        }
+
+    monkeypatch.setattr(main, "run_council", fake_council)
     with TestClient(main.app) as client:
         login(client, monkeypatch)
         status = client.get("/api/v1/trading/auto/status")
