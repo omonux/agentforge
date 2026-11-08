@@ -965,3 +965,7 @@ async def trading_universe_scan(x:UniverseScanRequest):
   raise HTTPException(400,str(exc))
  except httpx.HTTPError:
   raise HTTPException(503,"One or more public exchange feeds are unavailable. No candidate was approved.")
+
+# Optional PostgreSQL audit endpoints; SQLite application storage is unchanged.
+from .neon_audit import router as neon_audit_router
+app.include_router(neon_audit_router)
