@@ -90,6 +90,13 @@ export default function ConnectAPI({ onNotice }: Props) {
     } catch (e) { setError(e instanceof Error ? e.message : "Could not start YouTube connection."); setTesting(""); }
   };
 
+  const useGemini = () => {
+    setValues(current => ({ ...current, ai_base_url: "https://generativelanguage.googleapis.com/v1beta/openai", ai_model: "gemini-2.5-flash" }));
+    setEdited(current => ({ ...current, ai_base_url: true, ai_model: true }));
+    setError("");
+    onNotice?.("Gemini settings filled. Paste your Gemini API key in AI Agent Provider, then Save credentials and Test connection.");
+  };
+
   const total = services.length;
   const configured = services.filter(service => service.configured).length;
 
@@ -112,6 +119,7 @@ export default function ConnectAPI({ onNotice }: Props) {
           <div><span className="connect-group-label">{service.group}</span><h3>{service.name}</h3><p>{service.description}</p></div>
           <span className={"connect-state " + (service.check?.status === "connected" ? "connected" : service.configured ? "configured" : "missing")}>{service.check?.status === "connected" ? "Test passed" : service.check?.status === "manual" ? "Manual verification" : service.configured ? "Configured" : "Needs setup"}</span>
         </div>
+        {service.id === "ai" && <div style={{padding:"0 18px 12px"}}><button type="button" className="connect-refresh" onClick={useGemini}>Use free-tier Google Gemini</button><small style={{display:"block",marginTop:8}}>Fills the Gemini base URL and model only. Paste your own Gemini API key below, then save all three fields together. This replaces the active chat provider settings, not the image provider.</small></div>}
         <div className="connect-fields">
           {service.fields.map(field => <div className="connect-field" key={field.name}>
             <label htmlFor={field.name}>{field.label}{field.required && <i>Required</i>}</label>
