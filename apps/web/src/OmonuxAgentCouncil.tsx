@@ -22,8 +22,8 @@ export default function OmonuxAgentCouncil({onNotice}:{onNotice:(s:string)=>void
  }
  const council=result?.council, counts=council?.vote_counts;
  return <section className="panel omx-council">
-  <div className="portfoliohead"><div><h3><Users size={17}/> Twelve-agent trading council</h3><small>12 independent specialist reviews · consensus gate · paper trading only</small></div><span className="status">AI COUNCIL</span></div>
-  <div className="omx-auto-warning"><ShieldCheck size={16}/> The agents research and challenge a setup. They cannot place live orders. All 12 must respond; missing votes or a critical veto blocks the paper candidate.</div>
+  <div className="portfoliohead"><div><h3><Users size={17}/> Twelve-agent trading council</h3><small>12 specialist reviews · deterministic signal gate · guarded Spot review</small></div><span className="status">AI COUNCIL</span></div>
+  <div className="omx-auto-warning"><ShieldCheck size={16}/> The agents analyze the setup and produce a decision packet. A passing result can proceed to manual Spot order review; the agents cannot submit live orders. Missing votes or any critical veto blocks it.</div>
   <form className="backtestform" onSubmit={scan}>
    <div className="twocol">
     <label>Market symbol<input value={symbol} onChange={e=>S(e.target.value.toUpperCase())} maxLength={20} required placeholder="BTCUSDT"/></label>
@@ -31,11 +31,11 @@ export default function OmonuxAgentCouncil({onNotice}:{onNotice:(s:string)=>void
    </div>
    <button className="primary" disabled={busy}><Bot size={15}/>{busy?"Running 12 specialist agents…":"Run 12-agent analysis"}</button>
   </form>
-  {busy&&<div className="guard"><Activity size={14}/> Each specialist is independently querying the configured AI model. This can take a little time and uses provider API tokens.</div>}
+  {busy&&<div className="guard"><Activity size={14}/> Each specialist sends a separate analysis request to the same configured AI provider/model. This can take a little time and uses provider API tokens; these are not twelve separately hosted models.</div>}
   {!result&&<div className="council-grid">{defaultAgents.map((name,i)=><div className="council-agent" key={name}><span>{String(i+1).padStart(2,"0")}</span><b>{name}</b><em>READY</em></div>)}</div>}
   {council&&<div className="council-result">
    <div className={"council-verdict "+(council.approved?"approved":"blocked")}>
-    <div><small>COUNCIL CONCLUSION</small><h4>{council.approved?"PAPER CANDIDATE APPROVED":"NO TRADE — SETUP BLOCKED"}</h4><p>{council.buy_consensus_percent}% buy consensus · {council.completed_agents}/12 agents completed</p></div>
+    <div><small>COUNCIL CONCLUSION</small><h4>{council.execution_gate?.manual_review_eligible?"ELIGIBLE FOR MANUAL SPOT REVIEW":"NO TRADE — SETUP BLOCKED"}</h4><p>{council.buy_consensus_percent}% buy consensus · {council.completed_agents}/12 agents completed</p></div>
     <strong>{council.vote_counts.BUY} BUY<br/>{council.vote_counts.SELL} SELL<br/>{council.vote_counts.HOLD} HOLD</strong>
    </div>
    <div className="stats">
@@ -50,7 +50,7 @@ export default function OmonuxAgentCouncil({onNotice}:{onNotice:(s:string)=>void
     <div><span>{String(i+1).padStart(2,"0")}</span><b>{agent.name}</b><em className={"vote-"+agent.stance.toLowerCase()}>{agent.status==="failed"?"FAILED":agent.stance}</em></div>
     <p>{agent.reason}</p><small>{agent.confidence}% confidence{agent.veto?" · CRITICAL VETO":""}</small>
    </article>)}</div>
-   <div className="guard"><ShieldCheck size={14}/> {council.notice} · Evidence is based on completed public candles only; no order-book depth, funding, open interest or verified news feed was queried.</div>
+   <div className="omx-auto-warning"><ShieldCheck size={14}/> {council.execution_gate?.required_next_step||council.notice}</div><div className="guard"><ShieldCheck size={14}/> AI decisions never submit orders. Any order still requires a fresh exchange preview, account and permission checks, risk limits, and your explicit confirmation. Evidence uses completed public candles; order-book depth, funding, open interest and verified news are not currently supplied.</div>
   </div>}
  </section>
 }

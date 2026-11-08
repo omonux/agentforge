@@ -48,6 +48,16 @@ def ensure_tables():
         conn.execute("INSERT OR IGNORE INTO live_trading_state(id,emergency_stopped,updated) VALUES(1,1,?)", (stamp(),))
 
 
+def ensure_binance_spot_only(account: dict) -> None:
+    if account.get("canTrade") is not True:
+        raise HTTPException(403, "Binance Spot trading permission is not active.")
+    if account.get("canWithdraw") is not False:
+        raise HTTPException(403, "Live orders blocked: Binance must explicitly report withdrawals disabled on this API key.")
+    permissions = account.get("permissions")
+    if not isinstance(permissions, list) or set(permissions) != {"SPOT"}:
+        raise HTTPException(403, "Live orders blocked: Binance must confirm that the API key has Spot permissions only.")
+
+
 def live_keys():
     key = read_secret("binance_live_api_key")
     secret = read_secret("binance_live_api_secret")
@@ -172,8 +182,7 @@ async def preview_binance_order(request: PreviewRequest):
         public_binance_get("/api/v3/exchangeInfo", {"symbol": symbol}),
         public_binance_get("/api/v3/ticker/price", {"symbol": symbol}),
     )
-    if not account.get("canTrade"):
-        raise HTTPException(403, "Binance account does not have spot trading enabled.")
+    ensure_binance_spot_only(account)
     symbol_info = next((item for item in exchange_info.get("symbols", []) if item.get("symbol") == symbol), None)
     if not symbol_info or symbol_info.get("status") != "TRADING" or not symbol_info.get("isSpotTradingAllowed", False):
         raise HTTPException(400, "This symbol is not currently eligible for Binance Spot trading.")
@@ -264,11 +273,10 @@ async def place_binance_order(request: PlaceRequest):
         raise HTTPException(410, "Order preview expired. Request a fresh preview.")
     expected = f"PLACE LIVE {preview['side']} {preview['symbol']}"
     if request.confirmation != expected:
-        raise HTTPException(400, f'Type exactly "{expected}" to confirm this individual market order.')
+        raise HTTPException(400, f'Type exactly "{expected}" to confirm this individual LIMIT IOC Spot order.')
     # Recheck the live account and market price immediately before placement.
     account = await binance_get("/api/v3/account", key, secret)
-    if not account.get("canTrade"):
-        raise HTTPException(403, "Binance spot trading permission is not active.")
+    ensure_binance_spot_only(account)
     ticker = await public_binance_get("/api/v3/ticker/price", {"symbol": preview["symbol"]})
     current_price = dec(ticker.get("price"), "current price")
     reference_price = dec(preview["quote_price"], "preview price")

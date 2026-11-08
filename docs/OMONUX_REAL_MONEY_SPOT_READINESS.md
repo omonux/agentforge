@@ -25,6 +25,16 @@ The flags deliberately default to false. Before enabling either exchange, store 
 
 The current code defaults allow up to 25 USDT per order and 100 USDT aggregate daily notional. These are turnover caps, not a recommended amount to risk. For a planned 100 USDT starting balance, review and lower them before the first order if you want smaller exposure.
 
+## 12-agent decision gate and permission checks
+
+The 12 specialist roles run as separate concurrent AI requests to the configured provider/model; they are role-prompted specialists, not twelve separately hosted foundation models. A candidate can become eligible for manual Spot order review only when all twelve calls complete, at least eight vote BUY, no more than one votes SELL, no agent raises a critical veto, and the deterministic signal is BUY.
+
+The council now receives completed-candle summaries for 15m, 30m, 1h and 4h (plus the selected timeframe if different). Manual council scans also require aligned Binance and Bybit completed candles and block when the latest close-price divergence exceeds 0.35%. Missing secondary timeframe feeds are omitted from evidence; the multi-timeframe specialist must not claim to have reviewed data it did not receive.
+
+Before each Binance live preview and placement, the account response must explicitly confirm Spot trading enabled, withdrawals disabled, and Spot-only permissions. Before each Bybit live preview and placement, the API-key permission endpoint must confirm SpotTrade, no wallet/withdrawal or derivatives grants, and a configured IP allowlist. If permission information is missing or cannot be verified, the request is rejected.
+
+These checks reduce key-permission risk but do not prove that a strategy is profitable or make autonomous AI live execution safe. The council still cannot submit orders. A human must review and confirm each live order individually.
+
 ## First live-order procedure
 
 1. Deploy the reviewed main build and confirm /health is healthy.

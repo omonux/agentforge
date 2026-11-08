@@ -764,6 +764,7 @@ async def auto_trade_run_once():
  actions=[]
  # Manage existing positions first using latest closed candle prices.
  open_positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened")
+ position_management_failed=False
  for pos in open_positions:
   try:
    cs=await fetch_candles(pos["symbol"],"30m",60)
@@ -774,8 +775,13 @@ async def auto_trade_run_once():
     with db() as c: c.execute("DELETE FROM auto_trade_positions WHERE id=?",(pos["id"],))
     auto_event("PAPER_EXIT",pos["symbol"],exit_reason,pnl)
     actions.append({"symbol":pos["symbol"],"action":"CLOSE","reason":exit_reason,"price":price,"pnl":round(pnl,2)})
-  except (ValueError,httpx.HTTPError,IndexError) as e:
+  except (ValueError,httpx.HTTPError,IndexError,KeyError) as e:
+   position_management_failed=True
    auto_event("CYCLE_ERROR",pos["symbol"],str(e))
+ if position_management_failed:
+  # Do not open a new paper position when any existing position could not be
+  # checked for stop/target exits in this cycle.
+  return {"actions":actions,"blocked":"Existing-position market data unavailable; no new position opened","open_positions":len(rows("SELECT * FROM auto_trade_positions"))}
  open_positions=rows("SELECT * FROM auto_trade_positions")
  if len(open_positions)>=settings["max_open_positions"]:
   auto_event("RISK_BLOCK",details="Maximum open positions reached")
@@ -818,13 +824,17 @@ async def auto_trade_run_once():
    if last_scan and int(last_scan["last_candle_time"]) >= candle_time:
     continue
    council_attempted=True
+   # The AI council is a second approval gate, not an execution authority.
+   ai_base,ai_key,ai_model=current_ai_config()
+   timeframe_evidence=await fetch_council_timeframes(symbol,"30m",cs)
+   council=await run_council(symbol,"30m",cs,signal,ai_base,ai_key,ai_model,timeframe_evidence)
+   # Consume this candle only after the council returns successfully. A provider
+   # outage must not permanently suppress a retry for the same completed candle.
    with db() as c:
     c.execute(
      "INSERT OR REPLACE INTO council_scan_state(id,last_candle_time,updated) VALUES(1,?,?)",
      (candle_time,stamp()),
     )
-   # The AI council is a second approval gate, not an execution authority.
-   council=await run_council(symbol,"30m",cs,signal,BASE,KEY,MODEL)
    auto_event(
     "COUNCIL_DECISION",
     symbol,
@@ -850,6 +860,20 @@ async def auto_trade_run_once():
  return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"unrealized_pnl_at_cycle_start":round(unrealized_pnl,2),"daily_total_pnl_at_cycle_start":round(daily_total_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
 
 
+async def fetch_council_timeframes(symbol: str, primary_timeframe: str, primary_candles: list[dict]):
+ # Supply the multi-timeframe specialist with actual closed-candle evidence.
+ intervals = list(dict.fromkeys([primary_timeframe, "15m", "30m", "1h", "4h"]))
+ async def safe_fetch(interval):
+  if interval == primary_timeframe:
+   return interval, primary_candles
+  try:
+   return interval, await fetch_candles(symbol, interval, 120)
+  except (ValueError, httpx.HTTPError):
+   return interval, []
+ results = await asyncio.gather(*(safe_fetch(interval) for interval in intervals))
+ return {interval: candles for interval, candles in results if len(candles) >= 22}
+
+
 # Twelve-agent OMONUX market research council. It can only approve/reject
 # paper-trade candidates and has no exchange order-placement capability.
 class CouncilScanRequest(BaseModel):
@@ -860,10 +884,20 @@ class CouncilScanRequest(BaseModel):
 async def trading_agent_council_scan(x: CouncilScanRequest):
  try:
   symbol=validate_symbol(x.symbol)
-  candles=await fetch_candles(symbol,x.timeframe,120)
+  venues=await fetch_both_market_candles(symbol,x.timeframe,120)
+  candles=venues["binance"]
+  bybit_candles=venues["bybit"]
+  if not candles or not bybit_candles or candles[-1]["time"] != bybit_candles[-1]["time"]:
+   raise HTTPException(503,"Binance and Bybit completed candles are missing or not aligned. No candidate was approved.")
+  midpoint=(float(candles[-1]["close"])+float(bybit_candles[-1]["close"]))/2
+  divergence=abs(float(candles[-1]["close"])-float(bybit_candles[-1]["close"]))/midpoint*100 if midpoint else 999
+  if divergence>0.35:
+   raise HTTPException(503,f"Cross-exchange price divergence {divergence:.4f}% exceeds the 0.35% review limit. No candidate was approved.")
   signal=build_signal(symbol,candles)
-  result=await run_council(symbol,x.timeframe,candles,signal,BASE,KEY,MODEL)
-  return {"technical_signal":signal,"council":result}
+  ai_base,ai_key,ai_model=current_ai_config()
+  timeframe_evidence=await fetch_council_timeframes(symbol,x.timeframe,candles)
+  result=await run_council(symbol,x.timeframe,candles,signal,ai_base,ai_key,ai_model,timeframe_evidence)
+  return {"technical_signal":signal,"cross_venue_check":{"binance_close":candles[-1]["close"],"bybit_close":bybit_candles[-1]["close"],"price_divergence_percent":round(divergence,6),"passed":True},"council":result}
  except ValueError as exc:
   raise HTTPException(400,str(exc))
  except RuntimeError as exc:
