@@ -201,6 +201,7 @@ async def preview_bybit(request: BybitPreview):
         raise HTTPException(400, "Only BUY/SELL spot pairs quoted in USDT are supported.")
     quantity = decimal(request.quantity, "quantity")
     key, secret = bybit_keys()
+    await ensure_bybit_spot_only_permissions(key, secret)
     account = await bybit_request("GET", "/v5/account/wallet-balance", key, secret, {"accountType": "UNIFIED"})
     tickers = await bybit_request("GET", "/v5/market/tickers", key, secret, {"category": "spot", "symbol": symbol}, private=False)
     instruments = await bybit_request("GET", "/v5/market/instruments-info", key, secret, {"category": "spot", "symbol": symbol}, private=False)
@@ -282,6 +283,7 @@ async def place_bybit(request: BybitPlace):
     if request.confirmation != expected:
         raise HTTPException(400, f'Type exactly "{expected}" to confirm this order.')
     key, secret = bybit_keys()
+    await ensure_bybit_spot_only_permissions(key, secret)
     # Recheck market price and account funds immediately before submitting.
     ticker = await bybit_request("GET", "/v5/market/tickers", key, secret, {"category": "spot", "symbol": preview["symbol"]}, private=False)
     latest = next(iter(ticker.get("list", [])), None)
