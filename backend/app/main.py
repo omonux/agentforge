@@ -729,6 +729,36 @@ def auto_trade_stop():
  auto_event("ENGINE_STOPPED",details="Paper trading engine stopped")
  return auto_trade_status()
 
+@app.get("/api/v1/trading/auto/portfolio")
+async def auto_paper_portfolio():
+ """Independent $100 virtual account for the autonomous engine (not manual tickets)."""
+ events=rows("SELECT * FROM auto_trade_events ORDER BY created DESC LIMIT 300")
+ positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened DESC")
+ realized=sum(float(e["pnl"] or 0) for e in rows("SELECT pnl FROM auto_trade_events WHERE event_type='PAPER_EXIT'"))
+ holdings=[]; unrealized=0.0; invested=0.0; complete=True
+ for pos in positions:
+  entry=float(pos["entry_price"]); quantity=float(pos["quantity"])
+  invested+=entry*quantity
+  record={"symbol":pos["symbol"],"quantity":quantity,"entry_price":entry,"stop_price":pos["stop_price"],"target_price":pos["target_price"],"opened":pos["opened"],"mark_price":None,"unrealized_pnl":None}
+  try:
+   candles=await fetch_candles(pos["symbol"],"30m",60)
+   mark=float(candles[-1]["close"])
+   record["mark_price"]=mark
+   record["unrealized_pnl"]=round((mark-entry)*quantity,4)
+   unrealized+=(mark-entry)*quantity
+  except (ValueError,httpx.HTTPError,IndexError,KeyError):
+   complete=False
+  holdings.append(record)
+ equity=100.0+realized+unrealized if complete else None
+ return {"starting_balance":100.0,"realized_pnl":round(realized,4),
+         "unrealized_pnl":round(unrealized,4) if complete else None,
+         "equity":round(equity,4) if equity is not None else None,
+         "available_cash":round(100.0+realized-invested,4),
+         "invested_at_cost":round(invested,4),"positions":holdings,
+         "mark_to_market_complete":complete,"running":bool(auto_settings()["running"]),
+         "decisions":[{"event":e["event_type"],"symbol":e["symbol"],"reason":e["details"],"pnl":e["pnl"],"time":e["created"]} for e in events[:30]],
+         "notice":"Paper-only simulation. Prices use completed market candles; fees and slippage are not modeled. No trade is guaranteed."}
+
 @app.get("/api/v1/trading/auto/events")
 def auto_trade_events():
  return rows("SELECT * FROM auto_trade_events ORDER BY created DESC LIMIT 300")
@@ -744,7 +774,8 @@ async def auto_trade_run_once():
  day_events=rows("SELECT * FROM auto_trade_events WHERE created LIKE ?",(today+"%",))
  entries_today=sum(1 for e in day_events if e["event_type"]=="PAPER_ENTRY")
  daily_pnl=sum(float(e["pnl"] or 0) for e in day_events if e["event_type"]=="PAPER_EXIT")
- equity=100.0
+ realized_all=sum(float(e["pnl"] or 0) for e in rows("SELECT pnl FROM auto_trade_events WHERE event_type='PAPER_EXIT'"))
+ equity=max(0.0,100.0+realized_all)
  # Include current mark-to-market losses on every open paper position. If a quote
  # cannot be obtained, fail closed: do not open new positions using incomplete risk data.
  unrealized_pnl=0.0
@@ -845,7 +876,9 @@ async def auto_trade_run_once():
     continue
    price=float(signal["price"]); stop=float(signal["risk_levels"]["stop_reference"]); target=float(signal["risk_levels"]["target_reference"])
    risk_cash=equity*settings["risk_percent"]/100
-   quantity=min(risk_cash/max(price-stop,1e-12),(equity*settings["max_notional_percent"]/100)/price)
+   invested=sum(float(p["entry_price"])*float(p["quantity"]) for p in rows("SELECT entry_price,quantity FROM auto_trade_positions"))
+   available_cash=max(0.0,equity-invested)
+   quantity=min(risk_cash/max(price-stop,1e-12),(equity*settings["max_notional_percent"]/100)/price,available_cash/price)
    if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or stop>=price or target<=price: continue
    ident=str(uuid.uuid4())
    with db() as c:
