@@ -101,3 +101,7 @@
 .omx-strategy-lab .taskrow{border-color:#403321}
 .omx-strategy-lab .guard{line-height:1.65}
 @media(max-width:600px){.omx-strategy-lab .portfoliohead{align-items:flex-start;gap:10px}}
+
+/* Keep the full workspace navigation accessible on shorter screens. */
+.side{overflow-y:auto;overflow-x:hidden;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#52617a transparent}
+.side .sidebottom{flex-shrink:0}
