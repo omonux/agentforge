@@ -1,5 +1,6 @@
 import os, sqlite3, uuid, asyncio
-from .omonux_engine import fetch_candles, build_signal, validate_symbol\nfrom .omonux_exchange_market_data import fetch_both_market_candles
+from .omonux_engine import fetch_candles, build_signal, validate_symbol
+from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_council import run_council
 from pathlib import Path
 from datetime import datetime, timezone
