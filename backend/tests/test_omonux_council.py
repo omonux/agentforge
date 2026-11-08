@@ -86,7 +86,7 @@ def test_execution_gate_only_qualifies_candidate_for_manual_review():
     assert gate["candidate_status"] == "READY_FOR_MANUAL_REVIEW"
     assert gate["manual_review_eligible"] is True
     assert gate["automatic_live_orders_authorized"] is False
-    assert any("human" in item.lower() for item in gate["blockers"])
+    assert any("human" in item.lower() for item in gate["requirements"])
 
 
 @pytest.mark.parametrize("signal,summary", [
