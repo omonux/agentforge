@@ -10,6 +10,10 @@ AgentForge is a private, single-owner AI operations workspace. OMONUX is its tra
 - **Billing foundation:** Paystack card checkout and OPay hosted BankCard checkout, signed callbacks, server-side transaction verification and payment/subscription records. Billing is disabled by default.
 - **Security:** owner sign-in, HttpOnly session cookie, CSRF protection, login throttling and encrypted integration secrets.
 
+## OMONUX twelve-agent trading council
+
+The trading workspace includes twelve specialist AI reviews (market regime, trend, momentum, volume, volatility, support/resistance, timeframe context, breakout, mean reversion, liquidity, strategy and red-team). All twelve must respond, at least eight must vote BUY, no more than one may vote SELL, and no critical veto may be raised before a candidate can enter paper simulation. Automated council scans are rate-limited to one candidate every five minutes. The council cannot place live orders. See [the council design and safety policy](docs/OMONUX_12_AGENT_COUNCIL.md).
+
 ## Current release scope and limitations
 
 This is a **private single-owner release foundation**, not a multi-customer SaaS product. It is not a finished unattended automation platform.
