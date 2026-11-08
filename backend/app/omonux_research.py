@@ -15,7 +15,7 @@ router = APIRouter()
 class ResearchRequest(BaseModel):
     symbol: str = Field(default="BTCUSDT", min_length=2, max_length=20, pattern=r"^[A-Za-z0-9._-]+$")
     timeframe: str = Field(default="30m", pattern=r"^(5m|15m|30m|1h|4h|1d)$")
-    candle_limit: int = Field(default=1000, ge=300, le=1500)
+    candle_limit: int = Field(default=500, ge=300, le=500)
 
 
 def _ema(values: list[float], period: int) -> list[float]:
@@ -144,8 +144,7 @@ async def research_run(request: ResearchRequest):
     try:
         symbol = validate_symbol(request.symbol.upper())
         candles = await fetch_candles(symbol, interval=request.timeframe, limit=request.candle_limit)
-        closed = candles[:-1]
-        report = run_walk_forward(closed)
+        report = run_walk_forward(candles)
         return {"symbol": symbol, "timeframe": request.timeframe, **report, "mode": "research_only"}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
