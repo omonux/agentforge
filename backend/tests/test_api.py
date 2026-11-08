@@ -206,6 +206,37 @@ def test_omonux_auto_engine_fails_closed_when_ai_council_is_unavailable(tmp_path
         assert any(e["event_type"] == "CYCLE_ERROR" for e in events)
         assert not any(e["event_type"] == "PAPER_ENTRY" for e in events)
 
+
+def test_omonux_auto_engine_does_not_repeat_council_on_same_closed_candle(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "auto-council-once.db")
+    calls = []
+
+    async def fake_candles(symbol, interval="30m", limit=120):
+        return [
+            {"time": i, "open": 100 + i, "high": 101 + i,
+             "low": 99 + i, "close": 100 + i, "volume": 10}
+            for i in range(120)
+        ]
+
+    async def reject_candidate(symbol, timeframe, candles, signal, base_url, api_key, model):
+        calls.append(symbol)
+        return {
+            "approved": False,
+            "decision": "NO_TRADE",
+            "vote_counts": {"BUY": 7, "SELL": 1, "HOLD": 4},
+            "vetoes": [],
+        }
+
+    monkeypatch.setattr(main, "fetch_candles", fake_candles)
+    monkeypatch.setattr(main, "run_council", reject_candidate)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        client.post("/api/v1/trading/auto/start")
+        first = client.post("/api/v1/trading/auto/run-once")
+        second = client.post("/api/v1/trading/auto/run-once")
+        assert first.status_code == 200 and second.status_code == 200
+        assert calls == ["BTCUSDT"]
+
 def test_omonux_auto_engine_rejects_live_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB", tmp_path / "auto-live.db")
     with TestClient(main.app) as client:
