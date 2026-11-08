@@ -39,7 +39,7 @@ def test_council_evidence_contains_explicit_data_limits():
     candles = [{"time": i, "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100} for i in range(50)]
     evidence = _market_evidence("BTCUSDT", "30m", candles, {"side": "HOLD", "confidence": 50})
     assert evidence["closed_candle_count"] == 50
-    assert any("No order-book" in item for item in evidence["limitations"])
+    assert any("No order-book" in item for item in evidence["limitations"])\n\n\ndef test_council_evidence_summarizes_real_completed_timeframes():\n    candles = [{"time": i, "open": 10 + i, "high": 12 + i, "low": 9 + i, "close": 10 + i, "volume": 100} for i in range(50)]\n    evidence = _market_evidence("BTCUSDT", "30m", candles, {"side": "BUY"}, {"30m": candles, "1h": candles})\n    assert set(evidence["multi_timeframe_summaries"]) == {"30m", "1h"}\n    assert evidence["multi_timeframe_summaries"]["1h"]["closed_candles"] == 50\n    assert "ema_9" in evidence["multi_timeframe_summaries"]["1h"]
 
 
 def _votes(buy=8, sell=0, veto=False):
