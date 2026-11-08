@@ -785,7 +785,8 @@ async def auto_trade_run_once():
    auto_event("PAPER_ENTRY",symbol,f"confidence={signal['confidence']}; qty={quantity:.8f}; stop={stop}; target={target}")
    actions.append({"symbol":symbol,"action":"OPEN_PAPER","quantity":round(quantity,8),"entry":price,"stop":stop,"target":target,"confidence":signal["confidence"]})
    open_positions.append({"symbol":symbol}); entries_today+=1
-  except (ValueError,httpx.HTTPError,IndexError) as e:
+  except (ValueError,httpx.HTTPError,IndexError,RuntimeError) as e:
+   # Missing AI configuration or an unavailable council must block entries cleanly.
    auto_event("CYCLE_ERROR",symbol,str(e))
  with db() as c: c.execute("UPDATE auto_trade_settings SET updated=? WHERE id=1",(stamp(),))
  return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"unrealized_pnl_at_cycle_start":round(unrealized_pnl,2),"daily_total_pnl_at_cycle_start":round(daily_total_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
