@@ -180,6 +180,32 @@ def test_omonux_auto_paper_engine_controls_and_cycle(tmp_path, monkeypatch):
         assert stopped.status_code == 200 and stopped.json()["running"] is False
 
 
+
+def test_omonux_auto_engine_fails_closed_when_ai_council_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "auto-council-unavailable.db")
+
+    async def fake_candles(symbol, interval="30m", limit=120):
+        return [
+            {"time": i, "open": 100 + i, "high": 101 + i,
+             "low": 99 + i, "close": 100 + i, "volume": 10}
+            for i in range(120)
+        ]
+
+    async def unavailable_council(*args, **kwargs):
+        raise RuntimeError("AI provider is not configured.")
+
+    monkeypatch.setattr(main, "fetch_candles", fake_candles)
+    monkeypatch.setattr(main, "run_council", unavailable_council)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        client.post("/api/v1/trading/auto/start")
+        cycle = client.post("/api/v1/trading/auto/run-once")
+        assert cycle.status_code == 200
+        assert cycle.json()["actions"] == []
+        events = client.get("/api/v1/trading/auto/events").json()
+        assert any(e["event_type"] == "CYCLE_ERROR" for e in events)
+        assert not any(e["event_type"] == "PAPER_ENTRY" for e in events)
+
 def test_omonux_auto_engine_rejects_live_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB", tmp_path / "auto-live.db")
     with TestClient(main.app) as client:
