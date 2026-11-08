@@ -35,6 +35,26 @@ def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]],
     closes = [float(c["close"]) for c in candles]
     volumes = [float(c.get("volume", 0)) for c in candles]
     recent = candles[-20:]
+    timeframe_summaries = {}
+    for interval, interval_candles in (multi_timeframe_candles or {}).items():
+        if len(interval_candles) < 22:
+            continue
+        interval_closes = [float(c["close"]) for c in interval_candles]
+        def _ema(values: list[float], period: int) -> float:
+            alpha = 2 / (period + 1)
+            current = values[0]
+            for value in values[1:]:
+                current = value * alpha + current * (1 - alpha)
+            return current
+        previous = interval_closes[-6]
+        timeframe_summaries[interval] = {
+            "closed_candles": len(interval_candles),
+            "latest_closed_candle_time_ms": interval_candles[-1]["time"],
+            "latest_close": round(interval_closes[-1], 8),
+            "ema_9": round(_ema(interval_closes, 9), 8),
+            "ema_21": round(_ema(interval_closes, 21), 8),
+            "five_candle_return_percent": round((interval_closes[-1] / previous - 1) * 100, 4) if previous else 0,
+        }
     return {
         "symbol": symbol,
         "timeframe": timeframe,
