@@ -3,7 +3,19 @@ import { AudioLines, Check, Mic, MicOff, Send, Volume2, VolumeX, X } from "lucid
 import { API, apiFetch } from "./api";
 import "./agent-voice.css";
 
-type TaskReply = { result?: string; status?: string; error?: string; detail?: string };
+type TaskReply = { result?: unknown; status?: string; error?: unknown; detail?: unknown };
+function readable(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    for (const key of ["content", "message", "answer", "text", "detail", "error"]) {
+      if (typeof obj[key] === "string") return obj[key] as string;
+    }
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
+}
 type Turn = { role: "assistant" | "user"; text: string };
 
 export default function AgentVoiceWidget() {
@@ -105,10 +117,11 @@ export default function AgentVoiceWidget() {
         body: JSON.stringify({ agent: "research", title: prompt.slice(0, 110) || "Voice assistant request", prompt })
       });
       const data = await response.json() as TaskReply;
-      if (!response.ok) throw new Error(data.detail || data.error || "The request could not be completed.");
-      if (data.status !== "completed" || !data.result) throw new Error("The task was saved, but no completed answer was returned. Check your AgentForge task history.");
-      setTurns(prev => [...prev, { role: "assistant", text: data.result! }]);
-      speak(data.result);
+      if (!response.ok) throw new Error(readable(data.detail) || readable(data.error) || "The request could not be completed.");
+      const reply = readable(data.result);
+      if (data.status !== "completed" || !reply) throw new Error("The task was saved, but no completed answer was returned. Check your AgentForge task history.");
+      setTurns(prev => [...prev, { role: "assistant", text: reply }]);
+      speak(reply);
     } catch (e) {
       const message = e instanceof Error ? e.message : "AgentForge is temporarily unavailable.";
       setTurns(prev => [...prev, { role: "assistant", text: message }]);
