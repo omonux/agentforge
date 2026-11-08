@@ -31,7 +31,7 @@ export default function OmonuxAgentCouncil({onNotice}:{onNotice:(s:string)=>void
    </div>
    <button className="primary" disabled={busy}><Bot size={15}/>{busy?"Running 12 specialist agents…":"Run 12-agent analysis"}</button>
   </form>
-  {busy&&<div className="guard"><Activity size={14}/> Each specialist is independently querying the configured AI model. This can take a little time and uses provider API tokens.</div>}
+  {busy&&<div className="guard"><Activity size={14}/> Each specialist sends a separate analysis request to the same configured AI provider/model. This can take a little time and uses provider API tokens; these are not twelve separately hosted models.</div>}
   {!result&&<div className="council-grid">{defaultAgents.map((name,i)=><div className="council-agent" key={name}><span>{String(i+1).padStart(2,"0")}</span><b>{name}</b><em>READY</em></div>)}</div>}
   {council&&<div className="council-result">
    <div className={"council-verdict "+(council.approved?"approved":"blocked")}>
