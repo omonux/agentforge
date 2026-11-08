@@ -1,5 +1,6 @@
 import os, sqlite3, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal, validate_symbol
+from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_council import run_council
 from pathlib import Path
 from datetime import datetime, timezone
@@ -355,6 +356,34 @@ def workflow_status(ident:str,status:str):
   cur=c.execute("UPDATE workflows SET status=?,updated=? WHERE id=?",(status,stamp(),ident))
   if not cur.rowcount: raise HTTPException(404,"Workflow not found.")
  return one("SELECT * FROM workflows WHERE id=?",(ident,))
+# Read-only side-by-side Spot candles from Binance and Bybit. No orders are possible.
+@app.get("/api/v1/trading/market/compare/{symbol}")
+async def omonux_market_compare(symbol: str, interval: str = "30m", limit: int = 120):
+ try:
+  market=validate_symbol(symbol)
+  venues=await fetch_both_market_candles(market,interval,limit)
+  snapshots={}
+  for venue,candles in venues.items():
+   if not candles:
+    raise HTTPException(422,f"{venue.title()} returned no completed candles.")
+   latest=candles[-1]
+   snapshots[venue]={"latest_closed_candle":latest,"closed_candle_count":len(candles)}
+  return {
+   "symbol":market,
+   "interval":interval,
+   "exchanges":venues,
+   "snapshots":snapshots,
+   "latest_candles_aligned":snapshots["binance"]["latest_closed_candle"]["time"] == snapshots["bybit"]["latest_closed_candle"]["time"],
+   "mode":"read_only_market_data",
+   "notice":"Prices are venue-specific. Differences are not guaranteed executable arbitrage; fees, spread, depth, slippage and latency are not included. No order was placed."
+  }
+ except ValueError as exc:
+  raise HTTPException(400,str(exc))
+ except httpx.HTTPStatusError as exc:
+  raise HTTPException(502,f"An exchange market-data provider returned HTTP {exc.response.status_code}.")
+ except httpx.RequestError:
+  raise HTTPException(502,"Could not reach one or both exchanges. No comparison was produced.")
+
 # --- Omonux market data and signal research (closed candles; no execution) ---
 @app.get("/api/v1/trading/market/{symbol}")
 async def omonux_market(symbol: str, interval: str = "30m", limit: int = 120):
