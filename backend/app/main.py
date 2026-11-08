@@ -41,6 +41,7 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS trading_safety_state(id INTEGER PRIMARY KEY CHECK(id=1),emergency_stopped INTEGER NOT NULL DEFAULT 0,reason TEXT,updated TEXT NOT NULL)")
   c.execute("INSERT OR IGNORE INTO trading_safety_state(id,updated) VALUES(1,?)",(stamp(),))
+  c.execute("CREATE TABLE IF NOT EXISTS council_scan_state(id INTEGER PRIMARY KEY CHECK(id=1),last_candle_time INTEGER NOT NULL,updated TEXT NOT NULL)")
  async def live_reconciliation_scheduler():
   # Import lazily to avoid the main/router import cycle. Only recorded orders
   # are queried; this worker never creates, modifies or cancels exchange orders.
@@ -764,8 +765,20 @@ async def auto_trade_run_once():
    cs=await fetch_candles(symbol,"30m",120)
    signal=build_signal(symbol,cs)
    if signal["side"]!="BUY" or signal["confidence"]<settings["min_confidence"]: continue
-   # The AI council is a second approval gate, not an execution authority.
+   # A 30m candle may be reviewed only once automatically. The scheduler
+   # checks every five minutes, but this prevents repeated 12-call scans of
+   # the same completed candle and controls provider usage.
+   candle_time=int(cs[-1]["time"])
+   last_scan=one("SELECT last_candle_time FROM council_scan_state WHERE id=1")
+   if last_scan and int(last_scan["last_candle_time"]) >= candle_time:
+    continue
    council_attempted=True
+   with db() as c:
+    c.execute(
+     "INSERT OR REPLACE INTO council_scan_state(id,last_candle_time,updated) VALUES(1,?,?)",
+     (candle_time,stamp()),
+    )
+   # The AI council is a second approval gate, not an execution authority.
    council=await run_council(symbol,"30m",cs,signal,BASE,KEY,MODEL)
    auto_event(
     "COUNCIL_DECISION",
