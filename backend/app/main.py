@@ -851,6 +851,20 @@ async def auto_trade_run_once():
  return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"unrealized_pnl_at_cycle_start":round(unrealized_pnl,2),"daily_total_pnl_at_cycle_start":round(daily_total_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
 
 
+async def fetch_council_timeframes(symbol: str, primary_timeframe: str, primary_candles: list[dict]):
+ # Supply the multi-timeframe specialist with actual closed-candle evidence.
+ intervals = list(dict.fromkeys([primary_timeframe, "15m", "30m", "1h", "4h"]))
+ async def safe_fetch(interval):
+  if interval == primary_timeframe:
+   return interval, primary_candles
+  try:
+   return interval, await fetch_candles(symbol, interval, 120)
+  except (ValueError, httpx.HTTPError):
+   return interval, []
+ results = await asyncio.gather(*(safe_fetch(interval) for interval in intervals))
+ return {interval: candles for interval, candles in results if len(candles) >= 22}
+
+
 # Twelve-agent OMONUX market research council. It can only approve/reject
 # paper-trade candidates and has no exchange order-placement capability.
 class CouncilScanRequest(BaseModel):
