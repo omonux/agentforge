@@ -742,7 +742,7 @@ async def auto_trade_run_once():
  day_events=rows("SELECT * FROM auto_trade_events WHERE created LIKE ?",(today+"%",))
  entries_today=sum(1 for e in day_events if e["event_type"]=="PAPER_ENTRY")
  daily_pnl=sum(float(e["pnl"] or 0) for e in day_events if e["event_type"]=="PAPER_EXIT")
- equity=10000.0
+ equity=100.0
  # Include current mark-to-market losses on every open paper position. If a quote
  # cannot be obtained, fail closed: do not open new positions using incomplete risk data.
  unrealized_pnl=0.0
