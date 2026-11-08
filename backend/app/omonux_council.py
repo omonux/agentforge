@@ -20,7 +20,7 @@ SPECIALISTS = [
     ("volume", "Volume Analyst", "Assess volume expansion/contraction and whether it confirms the move. If volume evidence is insufficient, vote HOLD."),
     ("volatility", "Volatility Analyst", "Assess ATR and candle ranges. Reject setups where volatility makes the stop distance or reward/risk unattractive."),
     ("support_resistance", "Support & Resistance Analyst", "Assess nearby swing highs/lows and whether price is entering resistance/support. Do not invent levels."),
-    ("multi_timeframe", "Multi-Timeframe Analyst", "Use the supplied timeframe only. Explicitly state that other timeframes are unavailable; do not pretend to have checked them."),
+    ("multi_timeframe", "Multi-Timeframe Analyst", "Compare the supplied completed-candle summaries across all available timeframes. Identify alignment or conflict; if fewer than two timeframes are supplied, vote HOLD and state the limitation."),
     ("breakout", "Breakout Analyst", "Assess whether price has a confirmed close beyond a recent range. Avoid predicting unconfirmed breakouts."),
     ("mean_reversion", "Mean-Reversion Analyst", "Check whether price is stretched from its recent mean and whether chasing the move is risky."),
     ("liquidity", "Liquidity & Execution Analyst", "Use only candle volume/range as rough proxies. State that order-book depth, spread and slippage are unavailable."),
@@ -31,7 +31,7 @@ SPECIALISTS = [
 _ALLOWED = {"BUY", "SELL", "HOLD"}
 
 
-def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]], signal: dict[str, Any]) -> dict[str, Any]:
+def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]], signal: dict[str, Any], multi_timeframe_candles: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
     closes = [float(c["close"]) for c in candles]
     volumes = [float(c.get("volume", 0)) for c in candles]
     recent = candles[-20:]
@@ -162,7 +162,7 @@ async def run_council(
         raise RuntimeError("AI provider is not configured; the twelve-agent council cannot run.")
     if len(candles) < 40:
         raise ValueError("The council requires at least 40 completed candles.")
-    evidence = _market_evidence(symbol, timeframe, candles, signal)
+    evidence = _market_evidence(symbol, timeframe, candles, signal, multi_timeframe_candles)
     timeout = httpx.Timeout(75.0, connect=10.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         results = await asyncio.gather(
