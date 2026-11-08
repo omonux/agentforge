@@ -30,7 +30,9 @@ export default function OmonuxVoiceAssistant(){
   try{
    const response=await apiFetch(API+"/api/v1/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({agent:"research",title:"Omonux assistant: "+prompt.slice(0,90),prompt:"Respond conversationally and concisely as Omonux, the AgentForge AI assistant. Do not claim you have executed any action or placed trades. User: "+prompt})});
    const data=await response.json();
-   if(response.status===401){A("Your secure workspace session has expired. Sign in again to continue talking with Omonux.");E("Sign in required. Please refresh the page and sign in to AgentForge again.");return}\n   if(response.status===403){A("Your security token needs refreshing.");E("Refresh the page to renew your security token, then try again.");return}\n   if(!response.ok)throw Error(typeof data.detail==="string"?data.detail:"The AI request failed.");
+   if(response.status===401){A("Your secure workspace session has expired. Sign in again to continue talking with Omonux.");E("Sign in required. Please refresh the page and sign in to AgentForge again.");return} 
+   if(response.status===403){A("Your security token needs refreshing.");E("Refresh the page to renew your security token, then try again.");return} 
+   if(!response.ok)throw Error(typeof data.detail==="string"?data.detail:"The AI request failed.");
    if(data.status!=="completed"||!data.result)throw Error("AI did not return a completed answer.");
    A(data.result);speak(data.result);
   }catch(e){const message=e instanceof Error?e.message:"AI connection failed.";A("I couldn't answer that request.");E(message)}
