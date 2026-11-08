@@ -212,7 +212,7 @@ def summarize_votes(votes: list[dict[str, Any]]) -> dict[str, Any]:
     )
     return {
         "approved": approved,
-        "decision": "PAPER_CANDIDATE" if approved else "NO_TRADE",
+        "decision": "MANUAL_REVIEW_CANDIDATE" if approved else "NO_TRADE",
         "vote_counts": counts,
         "buy_consensus_percent": round(buy_votes / 12 * 100),
         "average_buy_confidence": average_buy_confidence,
