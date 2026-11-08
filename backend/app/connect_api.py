@@ -165,7 +165,31 @@ async def test_connection(service_id: str):
             async with httpx.AsyncClient(timeout=45) as client:
                 response=await client.post(base+"/chat/completions",headers={"Authorization":"Bearer "+key},
                     json={"model":model,"messages":[{"role":"user","content":"Reply with exactly: AgentForge connection successful."}],"temperature":0})
-            if response.status_code>=400: raise HTTPException(502,f"AI provider rejected the test (HTTP {response.status_code}). Check model access and billing.")
+            if response.status_code>=400:
+                category = None
+                try:
+                    body = response.json()
+                    err = body.get("error", {}) if isinstance(body, dict) else {}
+                    if isinstance(err, dict):
+                        category = err.get("code") or err.get("type")
+                except (ValueError, TypeError):
+                    pass
+                if response.status_code == 429:
+                    if category == "insufficient_quota":
+                        detail = "OpenAI returned insufficient_quota (429). Check whether this API key belongs to the funded organization and project, and whether its quota is active."
+                    elif category == "rate_limit_exceeded":
+                        detail = "OpenAI returned rate_limit_exceeded (429). Reduce request frequency and check this model's project rate limits."
+                    else:
+                        detail = "OpenAI returned HTTP 429. Check the API key's project, model limits and billing; available organization credits alone do not confirm this key has access."
+                elif response.status_code == 401:
+                    detail = "AI provider rejected this API key (401). Check that the saved Connect API key is current."
+                elif response.status_code == 403:
+                    detail = "AI provider denied access (403). Check API project permissions and model access."
+                elif response.status_code == 404:
+                    detail = "AI provider model or endpoint not found (404). Verify the model and base URL."
+                else:
+                    detail = f"AI provider rejected the connection test (HTTP {response.status_code})."
+                raise HTTPException(502, detail)
             if not response.json().get("choices"): raise HTTPException(502,"AI provider returned an unexpected response.")
             message="AI chat request succeeded."
         elif service_id=="images":
