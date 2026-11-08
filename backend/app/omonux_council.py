@@ -1,7 +1,8 @@
 """Twelve-specialist market research council for OMONUX.
 
-The council is an analysis and paper-trading gate only. It cannot place exchange orders.
-Each specialist receives the same completed-candle evidence and returns a constrained JSON vote.
+The council produces a structured decision packet for downstream risk review.
+It has no exchange-order capability; live orders remain a separate, manually
+confirmed workflow.
 """
 from __future__ import annotations
 
@@ -70,6 +71,7 @@ def _parse_vote(content: str, specialist_id: str, name: str) -> dict[str, Any]:
     reason = str(obj.get("reason", "")).strip()[:700]
     if not reason:
         raise ValueError("Agent did not explain its vote.")
+    evidence = obj.get("evidence", [])
     return {
         "id": specialist_id,
         "name": name,
@@ -77,7 +79,7 @@ def _parse_vote(content: str, specialist_id: str, name: str) -> dict[str, Any]:
         "confidence": confidence,
         "reason": reason,
         "veto": bool(obj.get("veto", False)),
-        "evidence": [str(x)[:180] for x in obj.get("evidence", [])[:4]] if isinstance(obj.get("evidence", []), list) else [],
+        "evidence": [str(x)[:180] for x in evidence[:4]] if isinstance(evidence, list) else [],
         "status": "completed",
     }
 
@@ -95,7 +97,7 @@ async def _run_specialist(
     system = (
         f"You are the {name}, one independent specialist in a twelve-agent crypto market research council. "
         f"{task} You are an analyst, not an execution system. Never invent market/news/order-book data. "
-        "Use only the supplied evidence. A BUY vote means evidence supports a cautious long paper-trade candidate; "
+        "Use only the supplied evidence. A BUY vote means evidence supports a cautious long candidate; "
         "SELL means evidence is materially adverse to that candidate; HOLD means uncertain or insufficient. "
         "Return ONLY valid JSON with keys: stance (BUY|SELL|HOLD), confidence (integer 0-100), "
         "reason (one concise paragraph), evidence (array of short observed facts), veto (boolean). "
@@ -116,8 +118,34 @@ async def _run_specialist(
     )
     response.raise_for_status()
     content = response.json()["choices"][0]["message"]["content"]
-    vote = _parse_vote(content, specialist_id, name)
-    return vote
+    return _parse_vote(content, specialist_id, name)
+
+
+def build_execution_gate(signal: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    """Create a fail-closed handoff packet; never authorizes or submits a live order."""
+    blockers: list[str] = []
+    if not summary.get("approved"):
+        blockers.append("The twelve-agent consensus did not pass.")
+    if str(signal.get("side", "")).upper() != "BUY":
+        blockers.append("The deterministic strategy signal is not BUY.")
+    if summary.get("completed_agents") != len(SPECIALISTS):
+        blockers.append("All twelve specialist responses are required.")
+    if summary.get("vetoes"):
+        blockers.append("At least one specialist raised a critical veto.")
+
+    eligible = not blockers
+    blockers.extend([
+        "Live exchange permissions, available balances, symbol rules and order limits must be revalidated by the exchange-specific order preview.",
+        "A human must review the order preview and explicitly confirm each order.",
+        "Autonomous AI-triggered live order placement is disabled; this council cannot submit orders.",
+    ])
+    return {
+        "candidate_status": "READY_FOR_MANUAL_REVIEW" if eligible else "BLOCKED",
+        "manual_review_eligible": eligible,
+        "automatic_live_orders_authorized": False,
+        "blockers": blockers,
+        "required_next_step": "Create a fresh exchange-specific Spot order preview and require explicit human confirmation." if eligible else "Do not create an order; wait for a new completed-candle scan that passes every gate.",
+    }
 
 
 async def run_council(
@@ -166,8 +194,9 @@ async def run_council(
         "errors": errors,
         "agents": votes,
         "evidence_timestamp_ms": candles[-1]["time"],
-        "execution": "paper_only_no_live_orders",
-        "notice": "AI votes are advisory. Deterministic risk checks remain mandatory; no live order can be placed by this council.",
+        "execution": "manual_review_only_no_automatic_live_orders",
+        "execution_gate": build_execution_gate(signal, summary),
+        "notice": "The council creates a candidate decision packet only. Exchange checks and explicit human confirmation remain mandatory; no AI vote can place a live order.",
     }
 
 
@@ -177,8 +206,6 @@ def summarize_votes(votes: list[dict[str, Any]]) -> dict[str, Any]:
     completed = sum(vote["status"] == "completed" for vote in votes)
     buy_votes = counts["BUY"]
     sell_votes = counts["SELL"]
-    # Strict fail-closed policy: all specialists must answer, at least 8/12 support,
-    # no more than 1 specialist opposes, and no critical veto is raised.
     approved = completed == 12 and buy_votes >= 8 and sell_votes <= 1 and not vetoes
     average_buy_confidence = round(
         sum(v["confidence"] for v in votes if v["stance"] == "BUY" and v["status"] == "completed") / max(1, buy_votes)
