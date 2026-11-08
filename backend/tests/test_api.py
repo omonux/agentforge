@@ -148,7 +148,7 @@ def test_omonux_auto_paper_engine_controls_and_cycle(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, "scan_market_universe", fake_universe_scan)
 
-    async def fake_council(symbol, timeframe, candles, signal, base_url, api_key, model):
+    async def fake_council(symbol, timeframe, candles, signal, base_url, api_key, model, multi_timeframe_candles=None):
         return {
             "approved": True,
             "decision": "PAPER_CANDIDATE",
@@ -240,7 +240,7 @@ def test_omonux_auto_engine_does_not_repeat_council_on_same_closed_candle(tmp_pa
             for i in range(120)
         ]
 
-    async def reject_candidate(symbol, timeframe, candles, signal, base_url, api_key, model):
+    async def reject_candidate(symbol, timeframe, candles, signal, base_url, api_key, model, multi_timeframe_candles=None):
         calls.append(symbol)
         return {
             "approved": False,
