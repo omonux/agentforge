@@ -32,7 +32,8 @@ This is intentionally strict. A rejected candidate is a NO TRADE result, not a r
 - The deterministic EMA/RSI/ATR signal is checked first.
 - The council runs only for a deterministic BUY candidate that meets the configured technical confidence threshold.
 - At most one candidate is sent to the council per automatic cycle.
-- Automatic cycles run every five minutes to avoid uncontrolled provider usage.
+- The scheduler polls every five minutes, but persistent candle tracking prevents another automatic council run until a new completed 30-minute candle is available.
+- Each council run makes twelve separate AI-provider requests; monitor token usage and provider billing.
 - Existing position sizing, stop/target references, daily-loss limits, cooldown, maximum positions, trade-count limits and emergency-stop latch remain in force.
 - The council has no exchange order-placement functions and cannot access live execution endpoints.
 - The existing live execution area remains separate, manually confirmed and feature-flagged off by default.
