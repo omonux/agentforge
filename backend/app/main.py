@@ -1,5 +1,6 @@
 import os, sqlite3, uuid, asyncio
-from .omonux_engine import fetch_candles, build_signal
+from .omonux_engine import fetch_candles, build_signal, validate_symbol
+from .omonux_council import run_council
 from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -545,7 +546,8 @@ async def auto_trade_scheduler():
     await auto_trade_run_once()
   except Exception as exc:
    auto_event("SCHEDULER_ERROR",details=str(exc))
-  await asyncio.sleep(60)
+  # Twelve independent AI calls are intentionally rate-limited to a five-minute cadence.
+  await asyncio.sleep(300)
 
 @app.get("/api/v1/trading/auto/status")
 def auto_trade_status():
@@ -663,13 +665,27 @@ async def auto_trade_run_once():
   elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(last_exit["created"])).total_seconds()/60
   if elapsed<settings["cooldown_minutes"]:
    return {"actions":actions,"blocked":"Cooldown active","cooldown_remaining_minutes":round(settings["cooldown_minutes"]-elapsed,1)}
+ council_attempted=False
  for symbol in ("BTCUSDT","ETHUSDT","SOLUSDT"):
+  if council_attempted: break
   if len(open_positions)>=settings["max_open_positions"] or entries_today>=settings["max_trades_per_day"]: break
   if any(p["symbol"]==symbol for p in open_positions): continue
   try:
    cs=await fetch_candles(symbol,"30m",120)
    signal=build_signal(symbol,cs)
    if signal["side"]!="BUY" or signal["confidence"]<settings["min_confidence"]: continue
+   # AI council is a second gate, never an execution authority. It must return
+   # all 12 independent votes and meet strict consensus before paper simulation.
+   council_attempted=True
+   council=await run_council(symbol,"30m",cs,signal,BASE,KEY,MODEL)
+   auto_event(
+    "COUNCIL_DECISION",
+    symbol,
+    f"decision={council['decision']}; buy={council['vote_counts']['BUY']}/12; "
+    f"sell={council['vote_counts']['SELL']}/12; vetoes={','.join(council['vetoes']) or 'none'}",
+   )
+   if not council["approved"]:
+    continue
    price=float(signal["price"]); stop=float(signal["risk_levels"]["stop_reference"]); target=float(signal["risk_levels"]["target_reference"])
    risk_cash=equity*settings["risk_percent"]/100
    quantity=min(risk_cash/max(price-stop,1e-12),(equity*settings["max_notional_percent"]/100)/price)
@@ -684,6 +700,28 @@ async def auto_trade_run_once():
    auto_event("CYCLE_ERROR",symbol,str(e))
  with db() as c: c.execute("UPDATE auto_trade_settings SET updated=? WHERE id=1",(stamp(),))
  return {"actions":actions,"open_positions":len(rows("SELECT * FROM auto_trade_positions")),"daily_entries":entries_today,"daily_realized_pnl":round(daily_pnl,2),"unrealized_pnl_at_cycle_start":round(unrealized_pnl,2),"daily_total_pnl_at_cycle_start":round(daily_total_pnl,2),"mode":"paper_only","notice":"No real exchange order was placed."}
+
+
+# Twelve-agent OMONUX market research council. AI agents can only approve/reject
+# a paper-trade candidate; they never have access to exchange order functions.
+class CouncilScanRequest(BaseModel):
+ symbol: str = Field(default="BTCUSDT", min_length=2, max_length=20)
+ timeframe: str = Field(default="30m", max_length=4)
+
+@app.post("/api/v1/trading/agents/scan")
+async def trading_agent_council_scan(x: CouncilScanRequest):
+ try:
+  symbol=validate_symbol(x.symbol)
+  candles=await fetch_candles(symbol,x.timeframe,120)
+  signal=build_signal(symbol,candles)
+  result=await run_council(symbol,x.timeframe,candles,signal,BASE,KEY,MODEL)
+  return {"technical_signal":signal,"council":result}
+ except ValueError as exc:
+  raise HTTPException(400,str(exc))
+ except RuntimeError as exc:
+  raise HTTPException(503,str(exc))
+ except httpx.HTTPError:
+  raise HTTPException(503,"Market data or AI provider is temporarily unavailable. No trade was approved.")
 
 # OMONUX legacy chart-image analysis, protected by the workspace auth middleware above.
 from .omonux_chart_analysis import router as omonux_chart_router
