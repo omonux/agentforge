@@ -137,6 +137,17 @@ def test_omonux_auto_paper_engine_controls_and_cycle(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, "fetch_candles", fake_candles)
 
+    async def fake_both(symbol, interval="30m", limit=120):
+        candles = await fake_candles(symbol, interval, limit)
+        return {"binance": candles, "bybit": candles}
+
+    monkeypatch.setattr(main, "fetch_both_market_candles", fake_both)
+
+    async def fake_universe_scan(interval="30m", limit=120, max_symbols=50):
+        return {"markets_checked": 50, "markets_ready": 50, "top_candidates": [{"symbol": "BTCUSDT"}]}
+
+    monkeypatch.setattr(main, "scan_market_universe", fake_universe_scan)
+
     async def fake_council(symbol, timeframe, candles, signal, base_url, api_key, model):
         return {
             "approved": True,
@@ -195,6 +206,17 @@ def test_omonux_auto_engine_fails_closed_when_ai_council_is_unavailable(tmp_path
         raise RuntimeError("AI provider is not configured.")
 
     monkeypatch.setattr(main, "fetch_candles", fake_candles)
+
+    async def fake_both(symbol, interval="30m", limit=120):
+        candles = await fake_candles(symbol, interval, limit)
+        return {"binance": candles, "bybit": candles}
+
+    monkeypatch.setattr(main, "fetch_both_market_candles", fake_both)
+
+    async def fake_universe_scan(interval="30m", limit=120, max_symbols=50):
+        return {"markets_checked": 50, "markets_ready": 50, "top_candidates": [{"symbol": "BTCUSDT"}]}
+
+    monkeypatch.setattr(main, "scan_market_universe", fake_universe_scan)
     monkeypatch.setattr(main, "run_council", unavailable_council)
     with TestClient(main.app) as client:
         login(client, monkeypatch)
@@ -228,6 +250,17 @@ def test_omonux_auto_engine_does_not_repeat_council_on_same_closed_candle(tmp_pa
         }
 
     monkeypatch.setattr(main, "fetch_candles", fake_candles)
+
+    async def fake_both(symbol, interval="30m", limit=120):
+        candles = await fake_candles(symbol, interval, limit)
+        return {"binance": candles, "bybit": candles}
+
+    monkeypatch.setattr(main, "fetch_both_market_candles", fake_both)
+
+    async def fake_universe_scan(interval="30m", limit=120, max_symbols=50):
+        return {"markets_checked": 50, "markets_ready": 50, "top_candidates": [{"symbol": "BTCUSDT"}]}
+
+    monkeypatch.setattr(main, "scan_market_universe", fake_universe_scan)
     monkeypatch.setattr(main, "run_council", reject_candidate)
     with TestClient(main.app) as client:
         login(client, monkeypatch)
