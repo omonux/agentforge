@@ -68,6 +68,7 @@ def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]],
         "recent_volumes": [round(v, 4) for v in volumes[-20:]],
         "average_volume_20": round(sum(volumes[-20:]) / max(1, len(volumes[-20:])), 4),
         "deterministic_signal": signal,
+        "multi_timeframe_summaries": timeframe_summaries,
         "limitations": [
             "Only completed candles are supplied.",
             "No order-book depth, spread, funding, open interest or verified news feed is available.",
