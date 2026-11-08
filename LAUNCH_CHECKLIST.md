@@ -15,13 +15,17 @@
 - [x] Persistent workflow queue requires explicit approval and only runs allowlisted agent-task, content-draft and Telegram-message actions.
 - [x] YouTube script, voice narration, estimated SRT captions, async render polling, channel analytics and Telegram event/report endpoints are implemented; external provider credentials and model compatibility still require live verification.
 - [x] YouTube upload uses an atomic approval state transition and blocks automatic retries when the upload outcome is uncertain.
+- [x] OMONUX has twelve independent AI specialist reviews with a strict consensus gate before paper-trade candidates are accepted.
+- [x] Automatic council scans are deduplicated by completed 30-minute candle; a scan uses twelve AI-provider requests and cannot place live orders.
 
 ## Must complete before any public-facing launch
 
-- [ ] Merge the stacked pull requests in dependency order (#2, #3, #4 and #5), resolving any conflicts and requiring green CI on the final `main` commit. PR #5 must not be merged ahead of its base dependency.
+- [ ] Verify the latest `main` commit has green backend, frontend and container CI checks before deployment; older stacked pull requests have been superseded by the current main branch.
 - [ ] Inspect the final GitHub diff and confirm no credentials, private keys, personal exchange data or local database files are committed.
 - [ ] Create the Render Blueprint service only after the final code is on `main`; verify the paid plan, Frankfurt region, disk and estimated bill before confirming.
-- [ ] Set a unique owner password, password salt, session secret, AI provider key and `COOKIE_SECURE=true` using private environment settings.
+- [ ] Set a unique owner password, password salt, session secret, AI provider key and model that supports JSON response mode, and `COOKIE_SECURE=true` using private environment settings.
+- [ ] Test the twelve-agent council manually in paper mode and review all twelve specialist explanations before enabling automatic paper cycles.
+- [ ] Monitor provider token usage: each council scan makes twelve separate model requests, and automatic scans run only on a new completed 30-minute candle.
 - [ ] Set `SECRET_ENCRYPTION_KEY` privately and back it up securely before entering Telegram or exchange secrets.
 - [ ] Keep `LIVE_TRADING_ENABLED=false` and `BYBIT_LIVE_TRADING_ENABLED=false`. Do not activate real-money trading for launch.
 - [ ] Verify health endpoint, owner sign-in/out, session expiry, CSRF writes, AI provider test and app navigation on the deployed HTTPS URL.
