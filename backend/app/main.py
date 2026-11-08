@@ -824,7 +824,8 @@ async def auto_trade_run_once():
      (candle_time,stamp()),
     )
    # The AI council is a second approval gate, not an execution authority.
-   council=await run_council(symbol,"30m",cs,signal,BASE,KEY,MODEL)
+   ai_base,ai_key,ai_model=current_ai_config()
+   council=await run_council(symbol,"30m",cs,signal,ai_base,ai_key,ai_model)
    auto_event(
     "COUNCIL_DECISION",
     symbol,
@@ -862,7 +863,8 @@ async def trading_agent_council_scan(x: CouncilScanRequest):
   symbol=validate_symbol(x.symbol)
   candles=await fetch_candles(symbol,x.timeframe,120)
   signal=build_signal(symbol,candles)
-  result=await run_council(symbol,x.timeframe,candles,signal,BASE,KEY,MODEL)
+  ai_base,ai_key,ai_model=current_ai_config()
+  result=await run_council(symbol,x.timeframe,candles,signal,ai_base,ai_key,ai_model)
   return {"technical_signal":signal,"council":result}
  except ValueError as exc:
   raise HTTPException(400,str(exc))
