@@ -1,5 +1,6 @@
 """Regression checks for fail-closed AI council vote validation."""
 import json
+import asyncio
 
 import pytest
 
@@ -38,8 +39,7 @@ def test_missing_required_vote_field_rejected(missing):
         _parse_vote(json.dumps(vote), "trend", "Trend Analyst")
 
 
-@pytest.mark.asyncio
-async def test_council_accepts_optional_timeframes_without_name_error():
+def test_council_accepts_optional_timeframes_without_name_error():
     with pytest.raises(ValueError, match="at least 40"):
-        await run_council("BTCUSDT", "30m", [], {}, "https://example.invalid",
-                          "placeholder", "test-model", multi_timeframe_candles={})
+        asyncio.run(run_council("BTCUSDT", "30m", [], {}, "https://example.invalid",
+                                "placeholder", "test-model", multi_timeframe_candles={}))
