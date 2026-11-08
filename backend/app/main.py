@@ -3,6 +3,7 @@ from .omonux_engine import fetch_candles, build_signal, validate_symbol
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_council import run_council
+from .omonux_research import router as omonux_research_router
 from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -101,6 +102,7 @@ async def life(app):
    try: await task
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
+app.include_router(omonux_research_router)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"],allow_credentials=True)
 class Task(BaseModel):
  agent:str
