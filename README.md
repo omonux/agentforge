@@ -12,7 +12,7 @@ AgentForge is a private, single-owner AI operations workspace. OMONUX is its tra
 
 ## OMONUX twelve-agent trading council
 
-The OMONUX trading workspace includes twelve specialist AI reviews. A paper-trade candidate requires all twelve valid responses, at least eight BUY votes, no more than one SELL vote and no critical veto. Automatic reviews are limited to one candidate every five minutes. The council cannot place live orders. See [the council design and safety policy](docs/OMONUX_12_AGENT_COUNCIL.md).
+The OMONUX trading workspace includes twelve specialist AI reviews. A paper-trade candidate requires all twelve valid responses, at least eight BUY votes, no more than one SELL vote and no critical veto. The scheduler polls every five minutes but runs the twelve-agent council only once per new completed 30-minute candle, preventing repeated scans of unchanged data. The council cannot place live orders. See [the council design and safety policy](docs/OMONUX_12_AGENT_COUNCIL.md).
 
 ## Current release scope and limitations
 
