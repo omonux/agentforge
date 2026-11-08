@@ -79,28 +79,38 @@ def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]],
 
 
 def _parse_vote(content: str, specialist_id: str, name: str) -> dict[str, Any]:
+    """Reject malformed or incomplete specialist votes instead of coercing them."""
     text = content.strip()
     text = re.sub(r"^\x60{3}(?:json)?\s*|\s*\x60{3}$", "", text, flags=re.IGNORECASE)
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("Agent did not return a JSON object.")
     obj = json.loads(text[start:end + 1])
-    stance = str(obj.get("stance", "HOLD")).upper()
-    if stance not in _ALLOWED:
+    if not isinstance(obj, dict):
+        raise ValueError("Agent vote must be a JSON object.")
+    if not {"stance", "confidence", "reason", "evidence", "veto"} <= obj.keys():
+        raise ValueError("Agent vote is missing required fields.")
+    stance = obj["stance"]
+    if not isinstance(stance, str) or stance not in _ALLOWED:
         raise ValueError("Agent returned an invalid stance.")
-    confidence = max(0, min(100, int(obj.get("confidence", 0))))
-    reason = str(obj.get("reason", "")).strip()[:700]
-    if not reason:
+    confidence = obj["confidence"]
+    if type(confidence) is not int or not 0 <= confidence <= 100:
+        raise ValueError("Agent confidence must be an integer from 0 to 100.")
+    if not isinstance(obj["reason"], str) or not obj["reason"].strip():
         raise ValueError("Agent did not explain its vote.")
-    evidence = obj.get("evidence", [])
+    if type(obj["veto"]) is not bool:
+        raise ValueError("Agent veto must be a boolean.")
+    evidence = obj["evidence"]
+    if not isinstance(evidence, list) or any(not isinstance(x, str) or not x.strip() for x in evidence):
+        raise ValueError("Agent evidence must be a list of non-empty strings.")
     return {
         "id": specialist_id,
         "name": name,
         "stance": stance,
         "confidence": confidence,
-        "reason": reason,
-        "veto": bool(obj.get("veto", False)),
-        "evidence": [str(x)[:180] for x in evidence[:4]] if isinstance(evidence, list) else [],
+        "reason": obj["reason"].strip()[:700],
+        "veto": obj["veto"],
+        "evidence": [x[:180] for x in evidence[:4]],
         "status": "completed",
     }
 
@@ -178,6 +188,7 @@ async def run_council(
     base_url: str,
     api_key: str,
     model: str,
+    multi_timeframe_candles: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Run all twelve specialists; fail closed if any specialist fails."""
     if not (base_url and api_key and model):
