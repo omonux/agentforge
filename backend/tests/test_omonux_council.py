@@ -56,7 +56,7 @@ def _votes(buy=8, sell=0, veto=False):
 def test_consensus_requires_eight_buy_votes_and_all_twelve_agents():
     result = summarize_votes(_votes())
     assert result["approved"] is True
-    assert result["decision"] == "PAPER_CANDIDATE"
+    assert result["decision"] == "MANUAL_REVIEW_CANDIDATE"
 
 
 def test_consensus_rejects_critical_veto_even_with_majority():
