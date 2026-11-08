@@ -54,9 +54,8 @@ def ensure_binance_spot_only(account: dict) -> None:
     if account.get("canWithdraw") is not False:
         raise HTTPException(403, "Live orders blocked: Binance must explicitly report withdrawals disabled on this API key.")
     permissions = account.get("permissions")
-    if permissions is not None:
-        if not isinstance(permissions, list) or set(permissions) - {"SPOT"} or "SPOT" not in permissions:
-            raise HTTPException(403, "Live orders blocked: the Binance API key must be limited to Spot permissions only.")
+    if not isinstance(permissions, list) or set(permissions) != {"SPOT"}:
+        raise HTTPException(403, "Live orders blocked: Binance must confirm that the API key has Spot permissions only.")
 
 
 def live_keys():
