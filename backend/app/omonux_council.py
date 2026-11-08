@@ -155,16 +155,17 @@ def build_execution_gate(signal: dict[str, Any], summary: dict[str, Any]) -> dic
         blockers.append("At least one specialist raised a critical veto.")
 
     eligible = not blockers
-    blockers.extend([
-        "Live exchange permissions, available balances, symbol rules and order limits must be revalidated by the exchange-specific order preview.",
+    requirements = [
+        "Revalidate exchange permissions, available balances, symbol rules and order limits in a fresh exchange-specific preview.",
         "A human must review the order preview and explicitly confirm each order.",
         "Autonomous AI-triggered live order placement is disabled; this council cannot submit orders.",
-    ])
+    ]
     return {
         "candidate_status": "READY_FOR_MANUAL_REVIEW" if eligible else "BLOCKED",
         "manual_review_eligible": eligible,
         "automatic_live_orders_authorized": False,
         "blockers": blockers,
+        "requirements": requirements,
         "required_next_step": "Create a fresh exchange-specific Spot order preview and require explicit human confirmation." if eligible else "Do not create an order; wait for a new completed-candle scan that passes every gate.",
     }
 
