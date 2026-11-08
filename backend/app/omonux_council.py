@@ -158,6 +158,20 @@ async def run_council(
         else:
             votes.append(result)
 
+    summary = summarize_votes(votes)
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        **summary,
+        "errors": errors,
+        "agents": votes,
+        "evidence_timestamp_ms": candles[-1]["time"],
+        "execution": "paper_only_no_live_orders",
+        "notice": "AI votes are advisory. Deterministic risk checks remain mandatory; no live order can be placed by this council.",
+    }
+
+
+def summarize_votes(votes: list[dict[str, Any]]) -> dict[str, Any]:
     counts = {stance: sum(1 for vote in votes if vote["stance"] == stance and vote["status"] == "completed") for stance in _ALLOWED}
     vetoes = [vote["id"] for vote in votes if vote["veto"]]
     completed = sum(vote["status"] == "completed" for vote in votes)
@@ -170,8 +184,6 @@ async def run_council(
         sum(v["confidence"] for v in votes if v["stance"] == "BUY" and v["status"] == "completed") / max(1, buy_votes)
     )
     return {
-        "symbol": symbol,
-        "timeframe": timeframe,
         "approved": approved,
         "decision": "PAPER_CANDIDATE" if approved else "NO_TRADE",
         "vote_counts": counts,
@@ -180,9 +192,4 @@ async def run_council(
         "completed_agents": completed,
         "required_buy_votes": 8,
         "vetoes": vetoes,
-        "errors": errors,
-        "agents": votes,
-        "evidence_timestamp_ms": candles[-1]["time"],
-        "execution": "paper_only_no_live_orders",
-        "notice": "AI votes are advisory. Deterministic risk checks remain mandatory; no live order can be placed by this council.",
     }
