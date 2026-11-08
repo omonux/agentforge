@@ -1,6 +1,7 @@
 import os, sqlite3, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal, validate_symbol
 from .omonux_exchange_market_data import fetch_both_market_candles
+from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_council import run_council
 from pathlib import Path
 from datetime import datetime, timezone
@@ -786,12 +787,22 @@ async def auto_trade_run_once():
   if elapsed<settings["cooldown_minutes"]:
    return {"actions":actions,"blocked":"Cooldown active","cooldown_remaining_minutes":round(settings["cooldown_minutes"]-elapsed,1)}
  council_attempted=False
- for symbol in ("BTCUSDT","ETHUSDT","SOLUSDT"):
+ for symbol in UNIVERSE_SYMBOLS:
   if council_attempted: break
   if len(open_positions)>=settings["max_open_positions"] or entries_today>=settings["max_trades_per_day"]: break
   if any(p["symbol"]==symbol for p in open_positions): continue
   try:
-   cs=await fetch_candles(symbol,"30m",120)
+   venues=await fetch_both_market_candles(symbol,"30m",120)
+   cs=venues["binance"]
+   bybit_candles=venues["bybit"]
+   if not cs or not bybit_candles or cs[-1]["time"] != bybit_candles[-1]["time"]:
+    auto_event("MARKET_DATA_BLOCK",symbol,"Binance/Bybit completed candle timestamps unavailable or misaligned")
+    continue
+   midpoint=(float(cs[-1]["close"])+float(bybit_candles[-1]["close"]))/2
+   divergence=abs(float(cs[-1]["close"])-float(bybit_candles[-1]["close"]))/midpoint*100 if midpoint else 999
+   if divergence>0.35:
+    auto_event("MARKET_DATA_BLOCK",symbol,f"Cross-venue price divergence {divergence:.4f}% exceeds 0.35%")
+    continue
    signal=build_signal(symbol,cs)
    if signal["side"]!="BUY" or signal["confidence"]<settings["min_confidence"]: continue
    # A 30m candle may be reviewed only once automatically. The scheduler
@@ -896,3 +907,22 @@ from .connect_api import router as connect_api_router
 app.include_router(connect_api_router)
 from .workflow_engine import router as workflow_runs_router
 app.include_router(workflow_runs_router)
+
+
+# OMONUX 50-market discovery API. Research-only; this route cannot place orders.
+class UniverseScanRequest(BaseModel):
+ interval: str = Field(default="30m", pattern="^(5m|15m|30m|1h|4h|1d)$")
+ max_symbols: int = Field(default=50, ge=1, le=50)
+
+@app.get("/api/v1/trading/universe")
+def trading_universe():
+ return {"symbols":list(UNIVERSE_SYMBOLS),"count":len(UNIVERSE_SYMBOLS),"venues":["binance_spot","bybit_spot"],"execution":"research_and_paper_only"}
+
+@app.post("/api/v1/trading/universe/scan")
+async def trading_universe_scan(x:UniverseScanRequest):
+ try:
+  return await scan_market_universe(interval=x.interval,max_symbols=x.max_symbols)
+ except ValueError as exc:
+  raise HTTPException(400,str(exc))
+ except httpx.HTTPError:
+  raise HTTPException(503,"One or more public exchange feeds are unavailable. No candidate was approved.")
