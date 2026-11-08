@@ -875,11 +875,20 @@ class CouncilScanRequest(BaseModel):
 async def trading_agent_council_scan(x: CouncilScanRequest):
  try:
   symbol=validate_symbol(x.symbol)
-  candles=await fetch_candles(symbol,x.timeframe,120)
+  venues=await fetch_both_market_candles(symbol,x.timeframe,120)
+  candles=venues["binance"]
+  bybit_candles=venues["bybit"]
+  if not candles or not bybit_candles or candles[-1]["time"] != bybit_candles[-1]["time"]:
+   raise HTTPException(503,"Binance and Bybit completed candles are missing or not aligned. No candidate was approved.")
+  midpoint=(float(candles[-1]["close"])+float(bybit_candles[-1]["close"]))/2
+  divergence=abs(float(candles[-1]["close"])-float(bybit_candles[-1]["close"]))/midpoint*100 if midpoint else 999
+  if divergence>0.35:
+   raise HTTPException(503,f"Cross-exchange price divergence {divergence:.4f}% exceeds the 0.35% review limit. No candidate was approved.")
   signal=build_signal(symbol,candles)
   ai_base,ai_key,ai_model=current_ai_config()
-  result=await run_council(symbol,x.timeframe,candles,signal,ai_base,ai_key,ai_model)
-  return {"technical_signal":signal,"council":result}
+  timeframe_evidence=await fetch_council_timeframes(symbol,x.timeframe,candles)
+  result=await run_council(symbol,x.timeframe,candles,signal,ai_base,ai_key,ai_model,timeframe_evidence)
+  return {"technical_signal":signal,"cross_venue_check":{"binance_close":candles[-1]["close"],"bybit_close":bybit_candles[-1]["close"],"price_divergence_percent":round(divergence,6),"passed":True},"council":result}
  except ValueError as exc:
   raise HTTPException(400,str(exc))
  except RuntimeError as exc:
