@@ -227,6 +227,53 @@ def test_omonux_auto_engine_fails_closed_when_ai_council_is_unavailable(tmp_path
         events = client.get("/api/v1/trading/auto/events").json()
         assert any(e["event_type"] == "CYCLE_ERROR" for e in events)
         assert not any(e["event_type"] == "PAPER_ENTRY" for e in events)
+        # Failed AI calls must not consume the completed candle; the next cycle
+        # should be allowed to retry when provider configuration is restored.
+        with main.db() as conn:
+            scan_state = conn.execute(
+                "SELECT last_candle_time FROM council_scan_state WHERE id=1"
+            ).fetchone()
+        assert scan_state is None
+
+
+def test_omonux_auto_engine_blocks_new_entries_when_existing_position_cannot_be_managed(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "position-management-fail-closed.db")
+    calls = {"count": 0}
+
+    async def flaky_candles(symbol, interval="30m", limit=120):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return [
+                {"time": i, "open": 100, "high": 101, "low": 99,
+                 "close": 100, "volume": 10}
+                for i in range(60)
+            ]
+        raise ValueError("Market data unavailable during position management")
+
+    monkeypatch.setattr(main, "fetch_candles", flaky_candles)
+    with TestClient(main.app) as client:
+        login(client, monkeypatch)
+        assert client.post("/api/v1/trading/auto/start").status_code == 200
+        with main.db() as conn:
+            conn.execute(
+                "INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",
+                ("open-position", "BTCUSDT", "BUY", 0.01, 100, 90, 120,
+                 main.stamp()),
+            )
+        response = client.post("/api/v1/trading/auto/run-once")
+        assert response.status_code == 200
+        assert "Existing-position market data unavailable" in response.json()["blocked"]
+        assert response.json()["open_positions"] == 1
+        assert calls["count"] == 2
+        with main.db() as conn:
+            remaining = conn.execute(
+                "SELECT COUNT(*) FROM auto_trade_positions"
+            ).fetchone()[0]
+        assert remaining == 1
+        assert not any(
+            event["event_type"] == "PAPER_ENTRY"
+            for event in client.get("/api/v1/trading/auto/events").json()
+        )
 
 
 def test_omonux_auto_engine_does_not_repeat_council_on_same_closed_candle(tmp_path, monkeypatch):
