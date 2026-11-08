@@ -105,3 +105,18 @@
 /* Keep the full workspace navigation accessible on shorter screens. */
 .side{overflow-y:auto;overflow-x:hidden;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#52617a transparent}
 .side .sidebottom{flex-shrink:0}
+
+/* Clear, page-specific workspace instructions */
+.room-guide{border:1px solid #34435f;border-radius:16px;background:linear-gradient(110deg,#151f34,#111827);padding:20px 22px;margin:0 0 22px}
+.room-guide-top{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.room-guide-eyebrow{font-size:11px;letter-spacing:.12em;color:#a7baff;font-weight:700}
+.room-guide h2{font-size:18px;margin:6px 0 7px;color:#f1f5ff}
+.room-guide p{margin:0;color:#b7c3d9;line-height:1.55}
+.room-guide-toggle{flex-shrink:0;border:1px solid #6276a0;border-radius:10px;background:#24324d;color:#f5f7ff;padding:11px 13px;display:flex;align-items:center;gap:9px;font-weight:700}
+.room-guide-toggle:hover,.room-guide-toggle:focus-visible{background:#33476a;outline:2px solid #899df4;outline-offset:2px}
+.room-guide-details{border-top:1px solid #34435f;margin-top:17px;padding-top:12px}
+.room-guide-details ol{margin:4px 0 14px;padding-left:25px;color:#e0e8f8;line-height:1.85}
+.room-guide-details li{padding-left:5px}
+.room-guide-details p{display:flex;align-items:flex-start;gap:9px;font-size:13px;color:#b9c6df}
+.room-guide-details p svg{flex-shrink:0;margin-top:2px}
+@media(max-width:720px){.room-guide-top{align-items:stretch;flex-direction:column}.room-guide-toggle{justify-content:center;width:100%}.room-guide{padding:16px}}
