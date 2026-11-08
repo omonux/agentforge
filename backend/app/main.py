@@ -688,6 +688,41 @@ async def auto_trade_scheduler():
   # Twelve specialist calls are rate-limited to a five-minute automatic cadence.
   await asyncio.sleep(300)
 
+
+class WorkspaceAssistantRequest(BaseModel):
+ message:str=Field(min_length=1,max_length=2000)
+ confirm:bool=False
+
+@app.post("/api/v1/assistant/command")
+async def workspace_assistant_command(req:WorkspaceAssistantRequest):
+ """Authenticated, allowlisted workspace commands. Never execute live exchange orders."""
+ import re
+ q=req.message.lower().strip()
+ if re.search(r"\\b(stop|pause|halt)\\b.*\\b(trad|engine)",q):
+  if not req.confirm:
+   return {"kind":"confirmation","action":"stop_paper","message":"Stop the automatic paper-trading engine? This does not close existing positions."}
+  result=auto_trade_stop()
+  return {"kind":"result","message":"Paper-trading engine stopped.","data":{"running":result["running"]}}
+ if re.search(r"\\b(start|enable|resume)\\b.*\\b(trad|engine)",q):
+  if not req.confirm:
+   return {"kind":"confirmation","action":"start_paper","message":"Start automatic PAPER trading with the existing risk settings? No live exchange orders will be placed."}
+  result=auto_trade_start()
+  return {"kind":"result","message":"Paper-trading engine started with existing risk controls.","data":{"running":result["running"]}}
+ if re.search(r"\\b(run|scan|check)\\b.*\\b(cycle|market|trade)",q):
+  if not req.confirm:
+   return {"kind":"confirmation","action":"run_paper","message":"Run one paper-trading evaluation cycle? This may open a simulated position if approved."}
+  result=await auto_trade_run_once()
+  return {"kind":"result","message":"Paper-trading evaluation finished. Review the audit events and portfolio for the decision.","data":{"actions":result.get("actions",[])}}
+ if re.search(r"\\b(trad|crypto|paper|portfolio|position|council|scanner|market|profit|pnl)",q):
+  status=auto_trade_status()
+  portfolio=auto_trade_portfolio()
+  events=auto_trade_events()
+  recent=events[:3] if isinstance(events,list) else []
+  return {"kind":"result","message":"Omonux Trading is "+("running" if status["running"] else "stopped")+". Mode: paper only. The 12-agent council evaluates qualifying signals from up to 50 scanned markets. The engine does not guarantee trades or profits.","data":{"settings":status["settings"],"running":status["running"],"portfolio":portfolio,"recent_events":recent}}
+ if re.search(r"\\b(status|health|overview|workspace)",q):
+  return {"kind":"result","message":"AgentForge workspace is available. I can inspect paper-trading status and portfolio, start/stop the paper engine with your confirmation, run one paper cycle with confirmation, and help navigate rooms. Publishing, payments, secrets and live orders are not enabled through this assistant.","data":{"tasks":len(tasks()),"agents":list(AGENTS.keys())}}
+ return {"kind":"result","message":"I can check Omonux Trading status and portfolio, start or stop PAPER trading after confirmation, run one paper cycle, or show workspace status. For other rooms, open the relevant section to use its controls. I cannot yet operate every external integration."}
+
 @app.get("/api/v1/trading/auto/status")
 def auto_trade_status():
  settings=auto_settings()
