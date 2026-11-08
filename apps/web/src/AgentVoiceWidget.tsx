@@ -31,6 +31,7 @@ export default function AgentVoiceWidget() {
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const lastReply = [...turns].reverse().find(t => t.role === "assistant")?.text || "";
 
@@ -48,20 +49,23 @@ export default function AgentVoiceWidget() {
 
   function stopSpeaking() {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    speechRef.current = null;
     setSpeaking(false);
   }
 
   function speak(text: string) {
-    if (!voiceEnabled || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
+    if (!voiceEnabled) { setError("Voice is muted. Turn on the speaker button to hear AgentForge."); return; }
+    if (!("speechSynthesis" in window)) { setError("Speech playback is unavailable in this browser. Try Chrome or Edge."); return; }
+    stopSpeaking();
     const utterance = new SpeechSynthesisUtterance(text);
     const selected = voices.find(v => v.name === voiceName);
     if (selected) utterance.voice = selected;
     utterance.rate = 1;
     utterance.pitch = 1;
     utterance.onstart = () => setSpeaking(true);
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
+    utterance.onend = () => { setSpeaking(false); speechRef.current = null; };
+    utterance.onerror = (event) => { setSpeaking(false); speechRef.current = null; if (event.error !== "canceled" && event.error !== "interrupted") setError("Voice playback failed. Check your device volume and browser sound permissions."); };
+    speechRef.current = utterance;
     window.speechSynthesis.speak(utterance);
   }
 
@@ -80,7 +84,7 @@ export default function AgentVoiceWidget() {
     setError("");
     const recognition = new SpeechRecognition();
     recognition.lang = navigator.language || "en-US";
-    recognition.interimResults = true;
+    recognition.interimResults = false;
     recognition.continuous = false;
     recognition.onstart = () => setListening(true);
     recognition.onresult = (event: any) => {
@@ -89,7 +93,7 @@ export default function AgentVoiceWidget() {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) finalText += transcript;
       }
-      if (finalText) setQuestion(current => (current ? current + " " : "") + finalText.trim());
+      if (finalText.trim()) { setQuestion(finalText.trim()); void askAgent(finalText.trim()); }
     };
     recognition.onerror = (event: any) => {
       setError(event.error === "not-allowed" ? "Microphone permission was blocked. Allow microphone access in your browser." : "I couldn't hear that clearly. Please try again or type your request.");
@@ -97,7 +101,7 @@ export default function AgentVoiceWidget() {
     };
     recognition.onend = () => setListening(false);
     recognitionRef.current = recognition;
-    recognition.start();
+    try { recognition.start(); } catch { setError("Could not start the microphone. Check microphone permissions and try again."); setListening(false); }
   }
 
   async function askAgent(promptValue: string) {
@@ -181,7 +185,8 @@ export default function AgentVoiceWidget() {
         </form>
         <footer className="af-companion-footer">
           <label>VOICE <select value={voiceName} onChange={e => setVoiceName(e.target.value)}><option value="">System default</option>{voices.filter(v => v.lang.toLowerCase().startsWith("en")).map(v => <option value={v.name} key={v.name}>{v.name}</option>)}</select></label>
-          <button onClick={() => speak(lastReply)} disabled={!lastReply || !voiceEnabled}><AudioLines size={13}/> Replay answer</button>
+          <button type="button" onClick={() => { setError(""); speak("Hello! I am AgentForge. My voice is working."); }}><AudioLines size={13}/> Test voice</button>
+          <button type="button" onClick={() => { setError(""); speak(lastReply); }} disabled={!lastReply || !voiceEnabled}>Replay answer</button>
         </footer>
         <div className="af-privacy-note"><Check size={11}/> Your AI provider key stays in AgentForge's secure backend vault.</div>
       </section>}
