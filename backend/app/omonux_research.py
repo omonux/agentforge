@@ -108,7 +108,7 @@ def run_walk_forward(candles: list[dict[str, Any]], initial_cash: float = 10000.
     split = int(len(candles) * 0.70)
     train, test = candles[:split], candles[split:]
     candidates = []
-    for fast, slow in product((5, 8, 12,  hacerlo), (21, 30, 40, 55)):
+    for fast, slow in product((5, 8, 12,  15), (21, 30, 40, 55)):
         if fast >= slow:
             continue
         try:
