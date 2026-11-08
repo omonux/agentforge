@@ -38,7 +38,7 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS workflows(id TEXT PRIMARY KEY,name TEXT NOT NULL,trigger_name TEXT NOT NULL,action_plan TEXT NOT NULL,status TEXT NOT NULL,created TEXT,updated TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS watchlist(id TEXT PRIMARY KEY,symbol TEXT NOT NULL UNIQUE,note TEXT,created TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS backtests(id TEXT PRIMARY KEY,symbol TEXT,fast_window INTEGER,slow_window INTEGER,initial_cash REAL,final_equity REAL,return_pct REAL,max_drawdown_pct REAL,trade_count INTEGER,created TEXT,report TEXT)")
-  c.execute("CREATE TABLE IF NOT EXISTS auto_trade_settings(id INTEGER PRIMARY KEY CHECK(id=1),running INTEGER NOT NULL DEFAULT 0,mode TEXT NOT NULL DEFAULT 'paper',risk_percent REAL NOT NULL DEFAULT 1,min_confidence INTEGER NOT NULL DEFAULT 60,max_open_positions INTEGER NOT NULL DEFAULT 3,max_daily_loss_percent REAL NOT NULL DEFAULT 5,cooldown_minutes INTEGER NOT NULL DEFAULT 15,max_trades_per_day INTEGER NOT NULL DEFAULT 10,max_notional_percent REAL NOT NULL DEFAULT 25,updated TEXT)")
+  c.execute("CREATE TABLE IF NOT EXISTS auto_trade_settings(id INTEGER PRIMARY KEY CHECK(id=1),running INTEGER NOT NULL DEFAULT 0,mode TEXT NOT NULL DEFAULT 'paper',risk_percent REAL NOT NULL DEFAULT 1,min_confidence INTEGER NOT NULL DEFAULT 75,max_open_positions INTEGER NOT NULL DEFAULT 2,max_daily_loss_percent REAL NOT NULL DEFAULT 3,cooldown_minutes INTEGER NOT NULL DEFAULT 30,max_trades_per_day INTEGER NOT NULL DEFAULT 5,max_notional_percent REAL NOT NULL DEFAULT 20,updated TEXT)")
   c.execute("INSERT OR IGNORE INTO auto_trade_settings(id,updated) VALUES(1,?)",(stamp(),))
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_positions(id TEXT PRIMARY KEY,symbol TEXT NOT NULL,side TEXT NOT NULL,quantity REAL NOT NULL,entry_price REAL NOT NULL,stop_price REAL NOT NULL,target_price REAL NOT NULL,opened TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
@@ -644,12 +644,12 @@ async def require_private_workspace(request:Request,call_next):
 class AutoTradeConfig(BaseModel):
  mode:str="paper"
  risk_percent:float=Field(default=1,ge=0.1,le=5)
- min_confidence:int=Field(default=60,ge=1,le=100)
- max_open_positions:int=Field(default=3,ge=1,le=20)
- max_daily_loss_percent:float=Field(default=5,gt=0,le=100)
- cooldown_minutes:int=Field(default=15,ge=0,le=1440)
- max_trades_per_day:int=Field(default=10,ge=1,le=100)
- max_notional_percent:float=Field(default=25,gt=0,le=100)
+ min_confidence:int=Field(default=75,ge=1,le=100)
+ max_open_positions:int=Field(default=2,ge=1,le=20)
+ max_daily_loss_percent:float=Field(default=3,gt=0,le=100)
+ cooldown_minutes:int=Field(default=30,ge=0,le=1440)
+ max_trades_per_day:int=Field(default=5,ge=1,le=100)
+ max_notional_percent:float=Field(default=20,gt=0,le=100)
 
 def auto_settings():
  row=one("SELECT * FROM auto_trade_settings WHERE id=1")
