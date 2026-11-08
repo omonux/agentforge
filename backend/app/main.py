@@ -685,8 +685,7 @@ async def auto_trade_scheduler():
     await auto_trade_run_once()
   except Exception as exc:
    auto_event("SCHEDULER_ERROR",details=str(exc))
-  # Twelve specialist calls are rate-limited to a five-minute automatic cadence.
-  await asyncio.sleep(300)
+  # Check paper positions and risk once per minute. Council scans remain gated\n  # to one evaluation per completed 30-minute candle to avoid duplicate AI calls.\n  await asyncio.sleep(60)
 
 @app.get("/api/v1/trading/auto/status")
 def auto_trade_status():
