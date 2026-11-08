@@ -195,6 +195,8 @@ async def test_connection(service_id: str):
         elif service_id=="images":
             base=secret_or_env("image_base_url","IMAGE_BASE_URL","https://api.openai.com/v1").rstrip("/")
             key=secret_or_env("image_api_key","IMAGE_API_KEY")
+            if not key and base=="https://api.openai.com/v1":
+                key=secret_or_env("ai_api_key","AI_API_KEY")
             if not key: raise HTTPException(409,"Add the image API key first.")
             async with httpx.AsyncClient(timeout=30) as client:
                 response=await client.get(base+"/models",headers={"Authorization":"Bearer "+key})

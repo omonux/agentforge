@@ -12,8 +12,12 @@ PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").lower()
 
 def image_config():
     key = secret_or_env("image_api_key", "IMAGE_API_KEY")
-    model = secret_or_env("image_model", "IMAGE_MODEL", "gpt-image-1")
+    # Share the saved OpenAI chat credential when a separate image key
+    # has not been configured. Never reuse it with third-party endpoints.
     base = secret_or_env("image_base_url", "IMAGE_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    if not key and base == "https://api.openai.com/v1":
+        key = secret_or_env("ai_api_key", "AI_API_KEY")
+    model = secret_or_env("image_model", "IMAGE_MODEL", "gpt-image-1")
     return key, model, base
 STORE = Path(os.getenv("IMAGE_STORAGE_DIR", "./storage/generated_images")).resolve()
 MAX_BYTES = int(os.getenv("IMAGE_MAX_UPLOAD_BYTES", "12000000"))
