@@ -3,6 +3,7 @@ from .omonux_engine import fetch_candles, build_signal, validate_symbol
 from .omonux_backtest import backtest_closed_candles
 from .omonux_challenge import challenge_report
 from .omonux_fast_radar import scan_fast_radar
+from .omonux_profit_protection import trailing_stop
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_live_books import scan_live_books
@@ -918,6 +919,16 @@ async def auto_trade_run_once():
   try:
    cs=await fetch_candles(pos["symbol"],"30m",60)
    price=float(cs[-1]["close"])
+   # Raise the paper stop only after a favorable 1R move. A closed-candle
+   # observation cannot imply an intrabar fill; the next cycle checks it.
+   entry=float(pos["entry_price"]); prior_stop=float(pos["stop_price"])
+   initial_risk=abs(entry-prior_stop)
+   if initial_risk>0 and ((pos["side"]=="BUY" and prior_stop<entry) or (pos["side"]=="SELL" and prior_stop>entry)):
+    updated_stop=trailing_stop(pos["side"],entry,prior_stop,price)
+    if updated_stop!=prior_stop:
+     with db() as c: c.execute("UPDATE auto_trade_positions SET stop_price=? WHERE id=?",(updated_stop,pos["id"]))
+     auto_event("PAPER_TRAIL",pos["symbol"],f"Paper trailing stop moved from {prior_stop:.8f} to {updated_stop:.8f}")
+     pos=dict(pos); pos["stop_price"]=updated_stop
    exit_reason=("STOP_LOSS" if price<=pos["stop_price"] else ("TAKE_PROFIT" if price>=pos["target_price"] else None)) if pos["side"]=="BUY" else ("STOP_LOSS" if price>=pos["stop_price"] else ("TAKE_PROFIT" if price<=pos["target_price"] else None))
    if exit_reason:
     pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])*(1 if pos["side"]=="BUY" else -1)
@@ -1006,6 +1017,11 @@ async def auto_trade_run_once():
     auto_event("RISK_BLOCK",symbol,"Council did not approve the proposed paper-trade direction")
     continue
    price=float(signal["price"]); stop=float(signal["risk_levels"]["stop_reference"]); target=float(signal["risk_levels"]["target_reference"])
+   # Paper-only: widen the reward objective, never the initial stop or quantity.
+   # Existing positions retain their original targets; only NEW entries change.
+   base_reward=abs(target-price)
+   if base_reward>0:
+    target=price+(1 if signal["side"]=="BUY" else -1)*base_reward*1.5
    risk_cash=equity*settings["risk_percent"]/100
    invested=sum(float(p["entry_price"])*float(p["quantity"]) for p in rows("SELECT entry_price,quantity FROM auto_trade_positions"))
    available_cash=max(0.0,equity-invested)
