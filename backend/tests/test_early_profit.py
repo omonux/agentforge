@@ -29,3 +29,11 @@ def test_loss_never_triggers_early_profit():
 def test_invalid_inputs():
     with pytest.raises(ValueError):
         early_profit_decision(side="BUY",entry=0,current=100,quantity=1)
+
+
+def test_exact_threshold_after_costs():
+    # With a $5 notional position, round-trip costs consume part of a gain.
+    close, net, _ = early_profit_decision(side="BUY", entry=100,
+                                          current=101.1, quantity=.05)
+    assert not close
+    assert net < .05
