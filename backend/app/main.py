@@ -1,6 +1,7 @@
 import os, sqlite3, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal, validate_symbol
 from .omonux_backtest import backtest_closed_candles
+from .omonux_challenge import challenge_report
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_live_books import scan_live_books
@@ -407,6 +408,29 @@ async def omonux_market_compare(symbol: str, interval: str = "30m", limit: int =
   raise HTTPException(502,"Could not reach one or both exchanges. No comparison was produced.")
 
 # --- Omonux market data and signal research (closed candles; no execution) ---
+class FastPaperChallengeRequest(BaseModel):
+ symbol: str = Field(default="BTCUSDT", min_length=2, max_length=20)
+ starting_cash: float = Field(default=68.0, gt=0, le=100000)
+ target_cash: float = Field(default=750.0, gt=0, le=1000000)
+ fee_bps: float = Field(default=10.0, ge=0, le=1000)
+ slippage_bps: float = Field(default=5.0, ge=0, le=1000)
+
+@app.post("/api/v1/trading/challenge/5m/backtest")
+async def fast_paper_challenge(req: FastPaperChallengeRequest):
+ """Five-minute historical research only; does not start or alter the paper engine."""
+ try:
+  symbol=validate_symbol(req.symbol)
+  candles=await fetch_candles(symbol,"5m",500)
+  return challenge_report(symbol,candles,initial_cash=req.starting_cash,
+                          target_cash=req.target_cash,fee_bps=req.fee_bps,
+                          slippage_bps=req.slippage_bps)
+ except ValueError as exc:
+  raise HTTPException(400,str(exc))
+ except httpx.HTTPStatusError as exc:
+  raise HTTPException(502,f"Market provider HTTP {exc.response.status_code}")
+ except httpx.RequestError:
+  raise HTTPException(503,"5-minute market data is temporarily unavailable")
+
 @app.get("/api/v1/trading/market/{symbol}")
 async def omonux_market(symbol: str, interval: str = "30m", limit: int = 120):
  try:
