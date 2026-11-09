@@ -1091,7 +1091,16 @@ async def auto_trade_run_once():
     auto_event("RISK_BLOCK",symbol,"Entry blocked: insufficient paper capital, invalid quantity or invalid stop/target geometry")
     continue
    ident=str(uuid.uuid4())
+   # Serialize the final admission check across overlapping scheduler/API cycles.
+   # Do not delete legacy duplicates: they remain independently managed.
    with db() as c:
+    c.execute("BEGIN IMMEDIATE")
+    existing=c.execute("SELECT COUNT(*) FROM auto_trade_positions WHERE symbol=?",(symbol,)).fetchone()[0]
+    count=c.execute("SELECT COUNT(*) FROM auto_trade_positions").fetchone()[0]
+    if existing or count>=settings["max_open_positions"]:
+     c.rollback()
+     auto_event("RISK_BLOCK",symbol,"Duplicate symbol or maximum open positions; no new paper entry")
+     continue
     c.execute("INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",(ident,symbol,signal["side"],quantity,price,stop,target,stamp()))
    auto_event("PAPER_ENTRY",symbol,f"side={signal['side']}; confidence={signal['directional_confidence']}; qty={quantity:.8f}; stake_usdt={stake_details["stake_usdt"]:.4f}; stop={stop}; target={target}")
    actions.append({"symbol":symbol,"action":"OPEN_PAPER","side":signal["side"],"quantity":round(quantity,8),"stake_usdt":stake_details["stake_usdt"],"entry":price,"stop":stop,"target":target,"confidence":signal["directional_confidence"]})
