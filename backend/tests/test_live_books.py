@@ -1,4 +1,5 @@
 import pytest
+import asyncio
 from app.omonux_live_books import evaluate_quotes,scan_live_books
 
 
@@ -22,9 +23,8 @@ def test_crossed_or_empty_books_fail_closed():
         evaluate_quotes("BTCUSDT",quote(0,101),quote(100,101))
 
 
-@pytest.mark.asyncio
-async def test_invalid_symbols_do_not_fetch():
+def test_invalid_symbols_do_not_fetch():
     with pytest.raises(ValueError):
-        await scan_live_books(["NOTLISTED"])
+        asyncio.run(scan_live_books(["NOTLISTED"]))
     with pytest.raises(ValueError):
-        await scan_live_books(["BTCUSDT","BTCUSDT"])
+        asyncio.run(scan_live_books(["BTCUSDT","BTCUSDT"]))
