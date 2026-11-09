@@ -4,6 +4,7 @@ from .omonux_backtest import backtest_closed_candles
 from .omonux_challenge import challenge_report
 from .omonux_fast_radar import scan_fast_radar
 from .omonux_profit_protection import trailing_stop
+from .omonux_stake_sizing import adaptive_paper_quantity
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_live_books import scan_live_books
@@ -1028,15 +1029,21 @@ async def auto_trade_run_once():
    if available_cash<=0:
     auto_event("RISK_BLOCK",symbol,"No unallocated paper capital available; entry skipped")
     continue
-   quantity=min(risk_cash/max(abs(price-stop),1e-12),(equity*settings["max_notional_percent"]/100)/price,available_cash/price)
+   quantity,stake_details=adaptive_paper_quantity(price=price,stop=stop,equity=equity,
+      available_cash=available_cash,risk_percent=settings["risk_percent"],
+      max_notional_percent=settings["max_notional_percent"],
+      confidence=signal["directional_confidence"])
+   if quantity<=0:
+    auto_event("RISK_BLOCK",symbol,stake_details.get("reason","Paper stake rejected"))
+    continue
    if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or not ((stop<price<target) if signal["side"]=="BUY" else (target<price<stop)):
     auto_event("RISK_BLOCK",symbol,"Entry blocked: insufficient paper capital, invalid quantity or invalid stop/target geometry")
     continue
    ident=str(uuid.uuid4())
    with db() as c:
     c.execute("INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",(ident,symbol,signal["side"],quantity,price,stop,target,stamp()))
-   auto_event("PAPER_ENTRY",symbol,f"side={signal['side']}; confidence={signal['directional_confidence']}; qty={quantity:.8f}; stop={stop}; target={target}")
-   actions.append({"symbol":symbol,"action":"OPEN_PAPER","side":signal["side"],"quantity":round(quantity,8),"entry":price,"stop":stop,"target":target,"confidence":signal["directional_confidence"]})
+   auto_event("PAPER_ENTRY",symbol,f"side={signal['side']}; confidence={signal['directional_confidence']}; qty={quantity:.8f}; stake_usdt={stake_details["stake_usdt"]:.4f}; stop={stop}; target={target}")
+   actions.append({"symbol":symbol,"action":"OPEN_PAPER","side":signal["side"],"quantity":round(quantity,8),"stake_usdt":stake_details["stake_usdt"],"entry":price,"stop":stop,"target":target,"confidence":signal["directional_confidence"]})
    open_positions.append({"symbol":symbol}); entries_today+=1
   except (ValueError,httpx.HTTPError,IndexError,RuntimeError) as e:
    # Missing AI configuration or an unavailable council must block entries cleanly.
