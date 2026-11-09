@@ -252,6 +252,9 @@ def test_omonux_auto_engine_blocks_new_entries_when_existing_position_cannot_be_
         raise ValueError("Market data unavailable during position management")
 
     monkeypatch.setattr(main, "fetch_candles", flaky_candles)
+    async def missing_fast_quotes(symbols):
+        return {}
+    monkeypatch.setattr(main, "fetch_fresh_prices", missing_fast_quotes)
     with TestClient(main.app) as client:
         login(client, monkeypatch)
         assert client.post("/api/v1/trading/auto/start").status_code == 200
@@ -265,7 +268,7 @@ def test_omonux_auto_engine_blocks_new_entries_when_existing_position_cannot_be_
         assert response.status_code == 200
         assert "Existing-position market data unavailable" in response.json()["blocked"]
         assert response.json()["open_positions"] == 1
-        assert calls["count"] == 2
+        assert calls["count"] == 1
         with main.db() as conn:
             remaining = conn.execute(
                 "SELECT COUNT(*) FROM auto_trade_positions"
