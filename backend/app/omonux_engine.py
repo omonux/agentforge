@@ -111,6 +111,27 @@ def build_signal(symbol: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
     score = max(0, min(100, round(score)))
     side = "BUY" if score >= 60 else ("SELL" if score <= 40 else "HOLD")
     price = closes[i]
+    # Research-only diagnostics: independent of the council's approval and
+    # never used to silently increase trade frequency or position size.
+    atr_percent = volatility[i] / price * 100 if price > 0 else 0.0
+    trend_spread_percent = (fast[i] - slow[i]) / price * 100 if price > 0 else 0.0
+    recent_volume = [max(0.0, float(item.get("volume", 0))) for item in candles[-21:]]
+    baseline_volume = sum(recent_volume[:-1]) / max(1, len(recent_volume) - 1)
+    volume_ratio = recent_volume[-1] / baseline_volume if baseline_volume > 0 else None
+    aligned = (side == "BUY" and fast[i] > slow[i]) or (side == "SELL" and fast[i] < slow[i])
+    evidence = {
+        "trend_alignment": "aligned" if aligned else "conflicting",
+        "trend_spread_percent": round(trend_spread_percent, 4),
+        "atr_percent": round(atr_percent, 4),
+        "volume_ratio_to_previous_20": round(volume_ratio, 3) if volume_ratio is not None else None,
+        "reward_risk_reference": 1.5,
+        "warnings": (
+            ([] if aligned else ["Proposed direction conflicts with EMA trend"])
+            + (["Volatility exceeds 5% of price"] if atr_percent > 5 else [])
+            + (["Latest volume is below 50% of the previous 20-candle average"] if volume_ratio is not None and volume_ratio < 0.5 else [])
+            + (["Volume evidence unavailable"] if volume_ratio is None else [])
+        ),
+    }
     return {
         "symbol": symbol,
         "timeframe": "closed_candles",
@@ -118,6 +139,7 @@ def build_signal(symbol: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
         "confidence": score,
         "directional_confidence": 100 - score if side == "SELL" else score,
         "price": price,
+        "analysis": evidence,
         "indicators": {
             "ema_9": round(fast[i], 8),
             "ema_21": round(slow[i], 8),
