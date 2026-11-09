@@ -5,6 +5,7 @@ from .omonux_challenge import challenge_report
 from .omonux_fast_radar import scan_fast_radar
 from .omonux_profit_protection import trailing_stop
 from .omonux_stake_sizing import adaptive_paper_quantity
+from .omonux_fast_monitor import fetch_fresh_prices, paper_exit_reason
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_live_books import scan_live_books
@@ -84,6 +85,7 @@ async def life(app):
     processed=False
    await asyncio.sleep(1 if processed else max(2,int(os.getenv("WORKFLOW_POLL_SECONDS","3"))))
  scheduler=asyncio.create_task(auto_trade_scheduler())
+ fast_monitor_scheduler=asyncio.create_task(fast_paper_monitor_scheduler())
  live_scheduler=asyncio.create_task(live_reconciliation_scheduler())
  async def youtube_telegram_scheduler():
   await asyncio.sleep(30)
@@ -721,6 +723,63 @@ def auto_event(kind,symbol=None,details=None,pnl=None):
  with db() as c:
   c.execute("INSERT INTO auto_trade_events VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),kind,symbol,details,pnl,stamp()))
 
+_paper_position_monitor_lock=asyncio.Lock()
+
+async def monitor_paper_positions():
+ """Monitor open paper positions using promptly received public spot quotes.
+
+ Binance ticker/price lacks exchange timestamps, so the monitor cannot
+ certify exchange-side quote freshness. Fail closed on missing/invalid quotes.
+ """
+ async with _paper_position_monitor_lock:
+  positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened")
+  if not positions:
+   return {"checked":0,"closed":0,"errors":[]}
+  prices=await fetch_fresh_prices([p["symbol"] for p in positions])
+  closed=0; errors=[]
+  for pos in positions:
+   symbol=pos["symbol"]
+   try:
+    if symbol not in prices:
+     errors.append(symbol)
+     auto_event("PAPER_MONITOR_ERROR",symbol,"Fresh public price quote unavailable; position left unchanged")
+     continue
+    price=prices[symbol]
+    # Stop takes priority. Do not trail first and then trigger the same quote.
+    reason=paper_exit_reason(pos["side"],price,float(pos["stop_price"]),float(pos["target_price"]))
+    if reason:
+     pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])*(1 if pos["side"]=="BUY" else -1)
+     with db() as conn:
+      deleted=conn.execute("DELETE FROM auto_trade_positions WHERE id=?",(pos["id"],)).rowcount
+     if deleted:
+      auto_event("PAPER_EXIT",symbol,f"{reason}; fast_quote_monitor; simulated_spot_price={price:.8f}",pnl)
+      closed+=1
+     continue
+    entry=float(pos["entry_price"]); old_stop=float(pos["stop_price"])
+    if (pos["side"]=="BUY" and old_stop<entry) or (pos["side"]=="SELL" and old_stop>entry):
+     new_stop=trailing_stop(pos["side"],entry,old_stop,price)
+     if new_stop!=old_stop:
+      with db() as conn:
+       updated=conn.execute("UPDATE auto_trade_positions SET stop_price=? WHERE id=? AND stop_price=?",
+                            (new_stop,pos["id"],old_stop)).rowcount
+      if updated:
+       auto_event("PAPER_TRAIL",symbol,f"Fast paper monitor tightened stop {old_stop:.8f} to {new_stop:.8f}")
+   except (ValueError,TypeError,KeyError) as exc:
+    errors.append(symbol)
+    auto_event("PAPER_MONITOR_ERROR",symbol,type(exc).__name__)
+  return {"checked":len(positions),"closed":closed,"errors":errors,"mode":"paper_only"}
+
+async def fast_paper_monitor_scheduler():
+ while True:
+  try:
+   await monitor_paper_positions()
+  except asyncio.CancelledError:
+   raise
+  except Exception as exc:
+   auto_event("PAPER_MONITOR_ERROR",details=type(exc).__name__)
+  await asyncio.sleep(10)
+
+
 async def auto_trade_scheduler():
  while True:
   try:
@@ -913,36 +972,9 @@ async def auto_trade_run_once():
   auto_event("RISK_BLOCK",details=f"Daily loss limit reached including unrealized P&L ({daily_total_pnl:.2f})")
   raise HTTPException(409,"Daily loss limit reached including open-position losses. The engine has been stopped; review the audit log before restarting.")
  actions=[]
- # Manage existing positions first using latest closed candle prices.
- open_positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened")
- position_management_failed=False
- for pos in open_positions:
-  try:
-   cs=await fetch_candles(pos["symbol"],"30m",60)
-   price=float(cs[-1]["close"])
-   # Raise the paper stop only after a favorable 1R move. A closed-candle
-   # observation cannot imply an intrabar fill; the next cycle checks it.
-   entry=float(pos["entry_price"]); prior_stop=float(pos["stop_price"])
-   initial_risk=abs(entry-prior_stop)
-   if initial_risk>0 and ((pos["side"]=="BUY" and prior_stop<entry) or (pos["side"]=="SELL" and prior_stop>entry)):
-    updated_stop=trailing_stop(pos["side"],entry,prior_stop,price)
-    if updated_stop!=prior_stop:
-     with db() as c: c.execute("UPDATE auto_trade_positions SET stop_price=? WHERE id=?",(updated_stop,pos["id"]))
-     auto_event("PAPER_TRAIL",pos["symbol"],f"Paper trailing stop moved from {prior_stop:.8f} to {updated_stop:.8f}")
-     pos=dict(pos); pos["stop_price"]=updated_stop
-   exit_reason=("STOP_LOSS" if price<=pos["stop_price"] else ("TAKE_PROFIT" if price>=pos["target_price"] else None)) if pos["side"]=="BUY" else ("STOP_LOSS" if price>=pos["stop_price"] else ("TAKE_PROFIT" if price<=pos["target_price"] else None))
-   if exit_reason:
-    pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])*(1 if pos["side"]=="BUY" else -1)
-    with db() as c: c.execute("DELETE FROM auto_trade_positions WHERE id=?",(pos["id"],))
-    auto_event("PAPER_EXIT",pos["symbol"],exit_reason,pnl)
-    actions.append({"symbol":pos["symbol"],"action":"CLOSE","reason":exit_reason,"price":price,"pnl":round(pnl,2)})
-  except (ValueError,httpx.HTTPError,IndexError,KeyError) as e:
-   position_management_failed=True
-   auto_event("CYCLE_ERROR",pos["symbol"],str(e))
- if position_management_failed:
-  # Do not open a new paper position when any existing position could not be
-  # checked for stop/target exits in this cycle.
-  return {"actions":actions,"blocked":"Existing-position market data unavailable; no new position opened","open_positions":len(rows("SELECT * FROM auto_trade_positions"))}
+ # Open positions are managed independently every 10 seconds by the fast
+ # paper monitor; the AI council stays on its five-minute entry cadence.
+ await monitor_paper_positions()
  open_positions=rows("SELECT * FROM auto_trade_positions")
  if len(open_positions)>=settings["max_open_positions"]:
   auto_event("RISK_BLOCK",details="Maximum open positions reached")
