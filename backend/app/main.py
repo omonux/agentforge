@@ -902,7 +902,7 @@ def auto_trade_stop():
 def auto_paper_analytics():
  from .omonux_profit_intelligence import paper_performance
  events=rows("SELECT id,event_type,created,pnl FROM auto_trade_events WHERE event_type='PAPER_EXIT' ORDER BY created,id")
- return paper_performance(events)
+ return paper_performance([dict(e) for e in events])
 
 
 @app.get("/api/v1/trading/auto/portfolio")
@@ -911,7 +911,7 @@ async def auto_paper_portfolio():
  from .omonux_profit_intelligence import paper_performance
  positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened DESC")
  exits=rows("SELECT id,event_type,created,pnl FROM auto_trade_events WHERE event_type='PAPER_EXIT' ORDER BY created,id")
- performance=paper_performance(exits)
+ performance=paper_performance([dict(e) for e in exits])
  realized=performance["realized_pnl"]
  symbols=list(dict.fromkeys(pos["symbol"] for pos in positions))
  try:
