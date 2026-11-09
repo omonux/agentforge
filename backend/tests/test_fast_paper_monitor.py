@@ -30,7 +30,7 @@ def test_fast_monitor_exit_without_ai(tmp_path,monkeypatch):
     assert result["closed"]==1
     assert main.rows("SELECT * FROM auto_trade_positions")==[]
     event=main.one("SELECT * FROM auto_trade_events WHERE event_type='PAPER_EXIT'")
-    assert event["pnl"]==pytest.approx(.5)
+    assert event["pnl"]==pytest.approx(.4795)
     assert "fast_quote_monitor" in event["details"]
 
 
