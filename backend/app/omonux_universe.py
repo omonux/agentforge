@@ -51,11 +51,11 @@ async def scan_market_universe(
                 divergence = abs(float(b["close"]) - float(y["close"])) / mid * 100 if mid else 999
                 signal = build_signal(symbol, left)
                 eligible = divergence <= max_price_divergence_pct
-                score = signal["confidence"] if signal["side"] == "BUY" and eligible else 0
+                score = signal["directional_confidence"] if signal["side"] in ("BUY", "SELL") and eligible else 0
                 return {
                     "symbol": symbol, "status": "ready" if eligible else "divergent",
                     "signal": signal["side"] if eligible else "HOLD",
-                    "confidence": signal["confidence"], "rank_score": score,
+                    "confidence": signal["directional_confidence"], "rank_score": score,
                     "binance_price": b["close"], "bybit_price": y["close"],
                     "price_divergence_pct": round(divergence, 4),
                     "candle_time": b["time"], "completed_candles": min(len(left), len(right)),

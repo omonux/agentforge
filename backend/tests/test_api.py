@@ -151,6 +151,7 @@ def test_omonux_auto_paper_engine_controls_and_cycle(tmp_path, monkeypatch):
     async def fake_council(symbol, timeframe, candles, signal, base_url, api_key, model, multi_timeframe_candles=None):
         return {
             "approved": True,
+            "approved_direction": signal["side"],
             "decision": "PAPER_CANDIDATE",
             "vote_counts": {"BUY": 10, "SELL": 0, "HOLD": 2},
             "vetoes": [],
