@@ -47,7 +47,11 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS watchlist(id TEXT PRIMARY KEY,symbol TEXT NOT NULL UNIQUE,note TEXT,created TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS backtests(id TEXT PRIMARY KEY,symbol TEXT,fast_window INTEGER,slow_window INTEGER,initial_cash REAL,final_equity REAL,return_pct REAL,max_drawdown_pct REAL,trade_count INTEGER,created TEXT,report TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_settings(id INTEGER PRIMARY KEY CHECK(id=1),running INTEGER NOT NULL DEFAULT 0,mode TEXT NOT NULL DEFAULT 'paper',risk_percent REAL NOT NULL DEFAULT 1,min_confidence INTEGER NOT NULL DEFAULT 75,max_open_positions INTEGER NOT NULL DEFAULT 2,max_daily_loss_percent REAL NOT NULL DEFAULT 3,cooldown_minutes INTEGER NOT NULL DEFAULT 30,max_trades_per_day INTEGER NOT NULL DEFAULT 5,max_notional_percent REAL NOT NULL DEFAULT 20,updated TEXT)")
+  # Additive migration: preserve existing settings and positions.
+  if "max_paper_stake_usdt" not in {column[1] for column in c.execute("PRAGMA table_info(auto_trade_settings)")}: 
+   c.execute("ALTER TABLE auto_trade_settings ADD COLUMN max_paper_stake_usdt REAL NOT NULL DEFAULT 10")
   c.execute("INSERT OR IGNORE INTO auto_trade_settings(id,updated) VALUES(1,?)",(stamp(),))
+  c.execute("UPDATE auto_trade_settings SET max_open_positions=MIN(max_open_positions,2) WHERE max_open_positions>2")
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_positions(id TEXT PRIMARY KEY,symbol TEXT NOT NULL,side TEXT NOT NULL,quantity REAL NOT NULL,entry_price REAL NOT NULL,stop_price REAL NOT NULL,target_price REAL NOT NULL,opened TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS auto_trade_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,symbol TEXT,details TEXT,pnl REAL,created TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS trading_safety_state(id INTEGER PRIMARY KEY CHECK(id=1),emergency_stopped INTEGER NOT NULL DEFAULT 0,reason TEXT,updated TEXT NOT NULL)")
@@ -708,7 +712,8 @@ class AutoTradeConfig(BaseModel):
  mode:str="paper"
  risk_percent:float=Field(default=1,ge=0.1,le=5)
  min_confidence:int=Field(default=75,ge=1,le=100)
- max_open_positions:int=Field(default=2,ge=1,le=20)
+ max_open_positions:int=Field(default=2,ge=1,le=2)
+ max_paper_stake_usdt:float=Field(default=10,ge=1,le=10,allow_inf_nan=False)
  max_daily_loss_percent:float=Field(default=3,gt=0,le=100)
  cooldown_minutes:int=Field(default=30,ge=0,le=1440)
  max_trades_per_day:int=Field(default=5,ge=1,le=100)
@@ -844,15 +849,15 @@ async def workspace_assistant_command(req:WorkspaceAssistantRequest):
 @app.get("/api/v1/trading/auto/status")
 def auto_trade_status():
  settings=auto_settings()
- return {"running":bool(settings["running"]),"settings":{k:settings[k] for k in ("mode","risk_percent","min_confidence","max_open_positions","max_daily_loss_percent","cooldown_minutes","max_trades_per_day","max_notional_percent")},"open_positions":rows("SELECT * FROM auto_trade_positions ORDER BY opened DESC"),"mode_notice":"Paper trading only. No exchange orders are supported by this engine."}
+ return {"running":bool(settings["running"]),"settings":{k:settings[k] for k in ("mode","risk_percent","min_confidence","max_open_positions","max_daily_loss_percent","cooldown_minutes","max_trades_per_day","max_notional_percent","max_paper_stake_usdt")},"open_positions":rows("SELECT * FROM auto_trade_positions ORDER BY opened DESC"),"mode_notice":"Paper trading only. No exchange orders are supported by this engine."}
 
 @app.put("/api/v1/trading/auto/config")
 def auto_trade_config(x:AutoTradeConfig):
  if x.mode!="paper":
   raise HTTPException(400,"Only paper mode is available. Live execution is not implemented.")
  with db() as c:
-  c.execute("""UPDATE auto_trade_settings SET mode=?,risk_percent=?,min_confidence=?,max_open_positions=?,max_daily_loss_percent=?,cooldown_minutes=?,max_trades_per_day=?,max_notional_percent=?,updated=? WHERE id=1""",
-   (x.mode,x.risk_percent,x.min_confidence,x.max_open_positions,x.max_daily_loss_percent,x.cooldown_minutes,x.max_trades_per_day,x.max_notional_percent,stamp()))
+  c.execute("""UPDATE auto_trade_settings SET mode=?,risk_percent=?,min_confidence=?,max_open_positions=?,max_daily_loss_percent=?,cooldown_minutes=?,max_trades_per_day=?,max_notional_percent=?,max_paper_stake_usdt=?,updated=? WHERE id=1""",
+   (x.mode,x.risk_percent,x.min_confidence,x.max_open_positions,x.max_daily_loss_percent,x.cooldown_minutes,x.max_trades_per_day,x.max_notional_percent,x.max_paper_stake_usdt,stamp()))
  return auto_trade_status()
 
 @app.get("/api/v1/trading/safety/status")
@@ -1019,7 +1024,7 @@ async def auto_trade_run_once():
   auto_event("RISK_BLOCK",details="Existing-position market data unavailable; no new paper entries")
   return {"actions":actions,"blocked":"Existing-position market data unavailable; no new position opened","open_positions":len(rows("SELECT * FROM auto_trade_positions"))}
  open_positions=rows("SELECT * FROM auto_trade_positions")
- if len(open_positions)>=settings["max_open_positions"]:
+ if len(open_positions)>=min(settings["max_open_positions"],2):
   auto_event("RISK_BLOCK",details="Maximum open positions reached")
   return {"actions":actions,"blocked":"Maximum open positions reached","open_positions":len(open_positions)}
  if entries_today>=settings["max_trades_per_day"]:
@@ -1107,7 +1112,7 @@ async def auto_trade_run_once():
    quantity,stake_details=adaptive_paper_quantity(price=price,stop=stop,equity=equity,
       available_cash=available_cash,risk_percent=settings["risk_percent"],
       max_notional_percent=settings["max_notional_percent"],
-      confidence=signal["directional_confidence"])
+      confidence=signal["directional_confidence"],max_stake=settings["max_paper_stake_usdt"])
    if quantity<=0:
     auto_event("RISK_BLOCK",symbol,stake_details.get("reason","Paper stake rejected"))
     continue
@@ -1133,7 +1138,7 @@ async def auto_trade_run_once():
     c.execute("BEGIN IMMEDIATE")
     existing=c.execute("SELECT COUNT(*) FROM auto_trade_positions WHERE symbol=?",(symbol,)).fetchone()[0]
     count=c.execute("SELECT COUNT(*) FROM auto_trade_positions").fetchone()[0]
-    if existing or count>=settings["max_open_positions"]:
+    if existing or count>=min(settings["max_open_positions"],2):
      c.rollback()
      auto_event("RISK_BLOCK",symbol,"Duplicate symbol or maximum open positions; no new paper entry")
      continue
