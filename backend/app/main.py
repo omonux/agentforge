@@ -104,10 +104,11 @@ async def life(app):
   yield
  finally:
   scheduler.cancel()
+  fast_monitor_scheduler.cancel()
   live_scheduler.cancel()
   workflow_scheduler.cancel()
   youtube_telegram_task.cancel()
-  for task in (scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task):
+  for task in (scheduler,fast_monitor_scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task):
    try: await task
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
