@@ -883,7 +883,9 @@ async def auto_trade_run_once():
   symbol=market["symbol"]
   if council_attempted: break
   if len(open_positions)>=settings["max_open_positions"] or entries_today>=settings["max_trades_per_day"]: break
-  if any(p["symbol"]==symbol for p in open_positions): continue
+  if any(p["symbol"]==symbol for p in open_positions):
+   auto_event("RISK_BLOCK",symbol,"Existing paper position in this symbol; duplicate entry skipped")
+   continue
   try:
    venues=await fetch_both_market_candles(symbol,"30m",120)
    cs=venues["binance"]
@@ -920,17 +922,23 @@ async def auto_trade_run_once():
    auto_event(
     "COUNCIL_DECISION",
     symbol,
-    f"decision={council['decision']}; direction={signal['side']}; buy={council['vote_counts']['BUY']}/12; "
+    f"paper_approved={bool(council['approved'] and council.get('approved_direction')==signal['side'])}; decision={council['decision']}; direction={signal['side']}; buy={council['vote_counts']['BUY']}/12; "
     f"sell={council['vote_counts']['SELL']}/12; vetoes={','.join(council['vetoes']) or 'none'}",
    )
    if not council["approved"] or council.get("approved_direction")!=signal["side"]:
+    auto_event("RISK_BLOCK",symbol,"Council did not approve the proposed paper-trade direction")
     continue
    price=float(signal["price"]); stop=float(signal["risk_levels"]["stop_reference"]); target=float(signal["risk_levels"]["target_reference"])
    risk_cash=equity*settings["risk_percent"]/100
    invested=sum(float(p["entry_price"])*float(p["quantity"]) for p in rows("SELECT entry_price,quantity FROM auto_trade_positions"))
    available_cash=max(0.0,equity-invested)
+   if available_cash<=0:
+    auto_event("RISK_BLOCK",symbol,"No unallocated paper capital available; entry skipped")
+    continue
    quantity=min(risk_cash/max(abs(price-stop),1e-12),(equity*settings["max_notional_percent"]/100)/price,available_cash/price)
-   if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or not ((stop<price<target) if signal["side"]=="BUY" else (target<price<stop)): continue
+   if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or not ((stop<price<target) if signal["side"]=="BUY" else (target<price<stop)):
+    auto_event("RISK_BLOCK",symbol,"Entry blocked: insufficient paper capital, invalid quantity or invalid stop/target geometry")
+    continue
    ident=str(uuid.uuid4())
    with db() as c:
     c.execute("INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",(ident,symbol,signal["side"],quantity,price,stop,target,stamp()))
