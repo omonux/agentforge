@@ -1,11 +1,10 @@
 """Fallback and fail-closed tests for $5 paper position monitoring."""
-import pytest
+import asyncio
 import httpx
 from app import omonux_fast_monitor as monitor
 
 
-@pytest.mark.asyncio
-async def test_fallback_host_recovers_public_quote(monkeypatch):
+def test_fallback_host_recovers_public_quote(monkeypatch):
     calls=[]
     class Response:
         def __init__(self, price): self.price=price
@@ -21,23 +20,21 @@ async def test_fallback_host_recovers_public_quote(monkeypatch):
                 raise httpx.ConnectError("primary unavailable")
             return Response("6.95")
     monkeypatch.setattr(monitor.httpx,"AsyncClient",Client)
-    assert await monitor.fetch_fresh_prices(["UNIUSDT"])=={"UNIUSDT":6.95}
+    assert asyncio.run(monitor.fetch_fresh_prices(["UNIUSDT"]))=={"UNIUSDT":6.95}
     assert len(calls)==2
 
 
-@pytest.mark.asyncio
-async def test_both_hosts_fail_closed(monkeypatch):
+def test_both_hosts_fail_closed(monkeypatch):
     class Client:
         def __init__(self, **kwargs): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
         async def get(self, url, params): raise httpx.ConnectError("unavailable")
     monkeypatch.setattr(monitor.httpx,"AsyncClient",Client)
-    assert await monitor.fetch_fresh_prices(["UNIUSDT"])=={}
+    assert asyncio.run(monitor.fetch_fresh_prices(["UNIUSDT"]))=={}
 
 
-@pytest.mark.asyncio
-async def test_rejects_invalid_quote_and_symbol(monkeypatch):
+def test_rejects_invalid_quote_and_symbol(monkeypatch):
     class Response:
         def raise_for_status(self): pass
         def json(self): return {"symbol":"OTHER","price":"nan"}
@@ -47,4 +44,4 @@ async def test_rejects_invalid_quote_and_symbol(monkeypatch):
         async def __aexit__(self, *args): pass
         async def get(self, url, params): return Response()
     monkeypatch.setattr(monitor.httpx,"AsyncClient",Client)
-    assert await monitor.fetch_fresh_prices(["UNIUSDT","../../etc"])=={}
+    assert asyncio.run(monitor.fetch_fresh_prices(["UNIUSDT","../../etc"]))=={}
