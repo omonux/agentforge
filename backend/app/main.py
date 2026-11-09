@@ -1070,6 +1070,31 @@ async def trading_historical_backtest(x: HistoricalBacktestRequest):
  except httpx.HTTPError:
   raise HTTPException(503,"Binance historical market data is currently unavailable.")
 
+def ensure_market_observations_table(conn):
+ conn.execute("""CREATE TABLE IF NOT EXISTS market_observations (
+  id TEXT PRIMARY KEY, symbol TEXT NOT NULL, checked_at_ms INTEGER NOT NULL,
+  buy_venue TEXT NOT NULL, sell_venue TEXT NOT NULL,
+  gross_edge_bps REAL NOT NULL, estimated_net_edge_bps REAL NOT NULL,
+  indicative_notional_usdt REAL NOT NULL, assumed_cost_bps REAL NOT NULL,
+  recorded_at TEXT NOT NULL)""")
+ conn.execute("CREATE INDEX IF NOT EXISTS idx_market_observations_time ON market_observations(checked_at_ms DESC)")
+ conn.execute("CREATE INDEX IF NOT EXISTS idx_market_observations_symbol_time ON market_observations(symbol,checked_at_ms DESC)")
+
+@app.get("/api/v1/trading/orderbook/history")
+def orderbook_observation_history(symbol: str = "BTCUSDT", limit: int = 100):
+ if symbol not in UNIVERSE_SYMBOLS:
+  raise HTTPException(400,"Symbol outside curated market universe")
+ if not 1 <= limit <= 500:
+  raise HTTPException(400,"History limit must be 1-500")
+ with db() as conn:
+  ensure_market_observations_table(conn)
+  items=[dict(row) for row in conn.execute(
+   "SELECT symbol,checked_at_ms,buy_venue,sell_venue,gross_edge_bps,estimated_net_edge_bps,indicative_notional_usdt,assumed_cost_bps FROM market_observations WHERE symbol=? ORDER BY checked_at_ms DESC LIMIT ?",
+   (symbol,limit))]
+ return {"symbol":symbol,"observations":items,"count":len(items),
+         "storage":"application_database","execution":"research_only_no_orders",
+         "notice":"These are indicative snapshots, not realized trade profits. Retention depends on the configured database volume."}
+
 class LiveBookResearchRequest(BaseModel):
  symbols: list[str] = Field(default_factory=lambda:["BTCUSDT","ETHUSDT","SOLUSDT"],min_length=1,max_length=10)
  fee_bps: float = Field(default=20,ge=0,le=100)
@@ -1079,8 +1104,24 @@ class LiveBookResearchRequest(BaseModel):
 @app.post("/api/v1/trading/orderbook/research")
 async def live_orderbook_research(x:LiveBookResearchRequest):
  try:
-  return await scan_live_books(x.symbols,fee_bps=x.fee_bps,
+  result=await scan_live_books(x.symbols,fee_bps=x.fee_bps,
                                slippage_bps=x.slippage_bps,extra_cost_bps=x.extra_cost_bps)
+  # Store only valid, read-only quotes; never record unavailable data as opportunities.
+  with db() as conn:
+   ensure_market_observations_table(conn)
+   for market in result["markets"]:
+    route=market.get("best_route")
+    if route:
+     conn.execute("""INSERT INTO market_observations
+      (id,symbol,checked_at_ms,buy_venue,sell_venue,gross_edge_bps,estimated_net_edge_bps,indicative_notional_usdt,assumed_cost_bps,recorded_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?)""",
+      (str(uuid.uuid4()),market["symbol"],result["checked_at_unix_ms"],
+       route["buy_venue"],route["sell_venue"],route["gross_edge_bps"],
+       route["estimated_net_edge_bps"],route["indicative_notional_usdt"],
+       result["markets"][0].get("assumed_total_cost_bps",x.fee_bps+x.slippage_bps+x.extra_cost_bps),stamp()))
+   # Keep the newest 10,000 records to bound storage usage.
+   conn.execute("DELETE FROM market_observations WHERE id IN (SELECT id FROM market_observations ORDER BY checked_at_ms DESC,id DESC LIMIT -1 OFFSET 10000)")
+  return result
  except ValueError as exc:
   raise HTTPException(400,str(exc))
 
