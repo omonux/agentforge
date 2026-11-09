@@ -790,13 +790,13 @@ async def auto_paper_portfolio():
  for pos in positions:
   entry=float(pos["entry_price"]); quantity=float(pos["quantity"])
   invested+=entry*quantity
-  record={"symbol":pos["symbol"],"quantity":quantity,"entry_price":entry,"stop_price":pos["stop_price"],"target_price":pos["target_price"],"opened":pos["opened"],"mark_price":None,"unrealized_pnl":None}
+  record={"symbol":pos["symbol"],"side":pos["side"],"quantity":quantity,"entry_price":entry,"stop_price":pos["stop_price"],"target_price":pos["target_price"],"opened":pos["opened"],"mark_price":None,"unrealized_pnl":None}
   try:
    candles=await fetch_candles(pos["symbol"],"30m",60)
    mark=float(candles[-1]["close"])
    record["mark_price"]=mark
-   record["unrealized_pnl"]=round((mark-entry)*quantity,4)
-   unrealized+=(mark-entry)*quantity
+   record["unrealized_pnl"]=round((mark-entry)*quantity*(1 if pos["side"]=="BUY" else -1),4)
+   unrealized+=(mark-entry)*quantity*(1 if pos["side"]=="BUY" else -1)
   except (ValueError,httpx.HTTPError,IndexError,KeyError):
    complete=False
   holdings.append(record)
@@ -834,7 +834,7 @@ async def auto_trade_run_once():
   try:
    mark_candles=await fetch_candles(held["symbol"],"30m",60)
    mark_price=float(mark_candles[-1]["close"])
-   unrealized_pnl+=(mark_price-float(held["entry_price"]))*float(held["quantity"])
+   unrealized_pnl+=(mark_price-float(held["entry_price"]))*float(held["quantity"])*(1 if held["side"]=="BUY" else -1)
   except (ValueError,httpx.HTTPError,IndexError,KeyError) as exc:
    auto_event("RISK_CHECK_ERROR",held.get("symbol"),str(exc))
    raise HTTPException(503,"Risk check could not price every open paper position. No new trades will be opened until market data is available.")
@@ -851,9 +851,9 @@ async def auto_trade_run_once():
   try:
    cs=await fetch_candles(pos["symbol"],"30m",60)
    price=float(cs[-1]["close"])
-   exit_reason="STOP_LOSS" if price<=pos["stop_price"] else ("TAKE_PROFIT" if price>=pos["target_price"] else None)
+   exit_reason=("STOP_LOSS" if price<=pos["stop_price"] else ("TAKE_PROFIT" if price>=pos["target_price"] else None)) if pos["side"]=="BUY" else ("STOP_LOSS" if price>=pos["stop_price"] else ("TAKE_PROFIT" if price<=pos["target_price"] else None))
    if exit_reason:
-    pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])
+    pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])*(1 if pos["side"]=="BUY" else -1)
     with db() as c: c.execute("DELETE FROM auto_trade_positions WHERE id=?",(pos["id"],))
     auto_event("PAPER_EXIT",pos["symbol"],exit_reason,pnl)
     actions.append({"symbol":pos["symbol"],"action":"CLOSE","reason":exit_reason,"price":price,"pnl":round(pnl,2)})
@@ -897,7 +897,7 @@ async def auto_trade_run_once():
     auto_event("MARKET_DATA_BLOCK",symbol,f"Cross-venue price divergence {divergence:.4f}% exceeds 0.35%")
     continue
    signal=build_signal(symbol,cs)
-   if signal["side"]!="BUY" or signal["confidence"]<settings["min_confidence"]: continue
+   if signal["side"] not in ("BUY","SELL") or signal["directional_confidence"]<settings["min_confidence"]: continue
    # A 30m candle may be reviewed only once automatically. The scheduler
    # checks every five minutes, but this prevents repeated 12-call scans of
    # the same completed candle and controls provider usage.
@@ -920,22 +920,22 @@ async def auto_trade_run_once():
    auto_event(
     "COUNCIL_DECISION",
     symbol,
-    f"decision={council['decision']}; buy={council['vote_counts']['BUY']}/12; "
+    f"decision={council['decision']}; direction={signal['side']}; buy={council['vote_counts']['BUY']}/12; "
     f"sell={council['vote_counts']['SELL']}/12; vetoes={','.join(council['vetoes']) or 'none'}",
    )
-   if not council["approved"]:
+   if not council["approved"] or council.get("approved_direction")!=signal["side"]:
     continue
    price=float(signal["price"]); stop=float(signal["risk_levels"]["stop_reference"]); target=float(signal["risk_levels"]["target_reference"])
    risk_cash=equity*settings["risk_percent"]/100
    invested=sum(float(p["entry_price"])*float(p["quantity"]) for p in rows("SELECT entry_price,quantity FROM auto_trade_positions"))
    available_cash=max(0.0,equity-invested)
-   quantity=min(risk_cash/max(price-stop,1e-12),(equity*settings["max_notional_percent"]/100)/price,available_cash/price)
-   if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or stop>=price or target<=price: continue
+   quantity=min(risk_cash/max(abs(price-stop),1e-12),(equity*settings["max_notional_percent"]/100)/price,available_cash/price)
+   if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or not ((stop<price<target) if signal["side"]=="BUY" else (target<price<stop)): continue
    ident=str(uuid.uuid4())
    with db() as c:
-    c.execute("INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",(ident,symbol,"BUY",quantity,price,stop,target,stamp()))
-   auto_event("PAPER_ENTRY",symbol,f"confidence={signal['confidence']}; qty={quantity:.8f}; stop={stop}; target={target}")
-   actions.append({"symbol":symbol,"action":"OPEN_PAPER","quantity":round(quantity,8),"entry":price,"stop":stop,"target":target,"confidence":signal["confidence"]})
+    c.execute("INSERT INTO auto_trade_positions VALUES(?,?,?,?,?,?,?,?)",(ident,symbol,signal["side"],quantity,price,stop,target,stamp()))
+   auto_event("PAPER_ENTRY",symbol,f"side={signal['side']}; confidence={signal['directional_confidence']}; qty={quantity:.8f}; stop={stop}; target={target}")
+   actions.append({"symbol":symbol,"action":"OPEN_PAPER","side":signal["side"],"quantity":round(quantity,8),"entry":price,"stop":stop,"target":target,"confidence":signal["directional_confidence"]})
    open_positions.append({"symbol":symbol}); entries_today+=1
   except (ValueError,httpx.HTTPError,IndexError,RuntimeError) as e:
    # Missing AI configuration or an unavailable council must block entries cleanly.
