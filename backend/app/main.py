@@ -47,6 +47,7 @@ async def life(app):
   c.execute("CREATE TABLE IF NOT EXISTS trading_safety_state(id INTEGER PRIMARY KEY CHECK(id=1),emergency_stopped INTEGER NOT NULL DEFAULT 0,reason TEXT,updated TEXT NOT NULL)")
   c.execute("INSERT OR IGNORE INTO trading_safety_state(id,updated) VALUES(1,?)",(stamp(),))
   c.execute("CREATE TABLE IF NOT EXISTS council_scan_state(id INTEGER PRIMARY KEY CHECK(id=1),last_candle_time INTEGER NOT NULL,updated TEXT NOT NULL)")
+  c.execute("CREATE TABLE IF NOT EXISTS council_symbol_scan_state(symbol TEXT PRIMARY KEY,last_candle_time INTEGER NOT NULL,updated TEXT NOT NULL)")
  async def live_reconciliation_scheduler():
   # Import lazily to avoid the main/router import cycle. Only recorded orders
   # are queried; this worker never creates, modifies or cancels exchange orders.
@@ -941,9 +942,9 @@ async def auto_trade_run_once():
    # checks every five minutes, but this prevents repeated 12-call scans of
    # the same completed candle and controls provider usage.
    candle_time=int(cs[-1]["time"])
-   last_scan=one("SELECT last_candle_time FROM council_scan_state WHERE id=1")
+   last_scan=one("SELECT last_candle_time FROM council_symbol_scan_state WHERE symbol=?",(symbol,))
    if last_scan and int(last_scan["last_candle_time"]) >= candle_time:
-    auto_event("RISK_BLOCK",symbol,"This completed 30-minute candle was already reviewed; waiting for a new candle")
+    auto_event("RISK_BLOCK",symbol,"This market and completed 30-minute candle were already reviewed; waiting for its next candle")
     continue
    council_attempted=True
    # The AI council is a second approval gate, not an execution authority.
@@ -954,8 +955,8 @@ async def auto_trade_run_once():
    # outage must not permanently suppress a retry for the same completed candle.
    with db() as c:
     c.execute(
-     "INSERT OR REPLACE INTO council_scan_state(id,last_candle_time,updated) VALUES(1,?,?)",
-     (candle_time,stamp()),
+     "INSERT INTO council_symbol_scan_state(symbol,last_candle_time,updated) VALUES(?,?,?) ON CONFLICT(symbol) DO UPDATE SET last_candle_time=excluded.last_candle_time,updated=excluded.updated",
+     (symbol,candle_time,stamp()),
     )
    auto_event(
     "COUNCIL_DECISION",
