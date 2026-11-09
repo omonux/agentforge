@@ -125,12 +125,13 @@ async def _run_specialist(
     task: str,
     evidence: dict[str, Any],
     semaphore: asyncio.Semaphore,
+    direction: str = "BUY",
 ) -> dict[str, Any]:
     system = (
         f"You are the {name}, one independent specialist in a twelve-agent crypto market research council. "
         f"{task} You are an analyst, not an execution system. Never invent market/news/order-book data. "
-        "Use only the supplied evidence. A BUY vote means evidence supports a cautious long candidate; "
-        "SELL means evidence is materially adverse to that candidate; HOLD means uncertain or insufficient. "
+        "Use only the supplied evidence. BUY supports a long candidate; SELL supports a short candidate; "
+        "HOLD means uncertain or insufficient. Evaluate the proposed direction: " + direction + ". "
         "Return ONLY valid JSON with keys: stance (BUY|SELL|HOLD), confidence (integer 0-100), "
         "reason (one concise paragraph), evidence (array of short observed facts), veto (boolean). "
         "Set veto=true only for a critical risk that should block even a majority vote."
@@ -203,7 +204,7 @@ async def run_council(
     async with httpx.AsyncClient(timeout=timeout) as client:
         results = await asyncio.gather(
             *[
-                _run_specialist(client, base_url, api_key, model, sid, name, task, evidence, semaphore)
+                _run_specialist(client, base_url, api_key, model, sid, name, task, evidence, semaphore, signal["side"])
                 for sid, name, task in SPECIALISTS
             ],
             return_exceptions=True,
@@ -235,7 +236,7 @@ async def run_council(
         else:
             votes.append(result)
 
-    summary = summarize_votes(votes)
+    summary = summarize_votes(votes, signal["side"])
     return {
         "symbol": symbol,
         "timeframe": timeframe,
@@ -249,23 +250,31 @@ async def run_council(
     }
 
 
-def summarize_votes(votes: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_votes(votes: list[dict[str, Any]], direction: str = "BUY") -> dict[str, Any]:
     counts = {stance: sum(1 for vote in votes if vote["stance"] == stance and vote["status"] == "completed") for stance in _ALLOWED}
     vetoes = [vote["id"] for vote in votes if vote["veto"]]
     completed = sum(vote["status"] == "completed" for vote in votes)
     buy_votes = counts["BUY"]
     sell_votes = counts["SELL"]
-    approved = completed == 12 and buy_votes >= 8 and sell_votes <= 1 and not vetoes
+    if direction not in ("BUY", "SELL"):
+        direction = "HOLD"
+    supporting = counts.get(direction, 0)
+    opposing = counts["SELL" if direction == "BUY" else "BUY"] if direction != "HOLD" else 12
+    approved = completed == 12 and supporting >= 8 and opposing <= 1 and not vetoes
     average_buy_confidence = round(
         sum(v["confidence"] for v in votes if v["stance"] == "BUY" and v["status"] == "completed") / max(1, buy_votes)
     )
     return {
         "approved": approved,
+        "approved_direction": direction if approved else None,
+        "proposed_direction": direction,
+        "supporting_votes": supporting,
         "decision": "MANUAL_REVIEW_CANDIDATE" if approved else "NO_TRADE",
         "vote_counts": counts,
         "buy_consensus_percent": round(buy_votes / 12 * 100),
         "average_buy_confidence": average_buy_confidence,
         "completed_agents": completed,
         "required_buy_votes": 8,
+        "required_directional_votes": 8,
         "vetoes": vetoes,
     }
