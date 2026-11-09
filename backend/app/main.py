@@ -878,14 +878,18 @@ async def auto_trade_run_once():
    return {"actions":actions,"blocked":"Cooldown active","cooldown_remaining_minutes":round(settings["cooldown_minutes"]-elapsed,1)}
  universe_scan=await scan_market_universe(interval="30m",limit=120,max_symbols=50)
  auto_event("UNIVERSE_SCAN",details=f"checked={universe_scan['markets_checked']}; ready={universe_scan['markets_ready']}; candidates={len(universe_scan['top_candidates'])}")
+ # Filter held symbols before expensive cross-venue fetches and AI council calls.
+ # Keep the original ranking of eligible candidates; never bypass council or risk gates.
+ held_symbols={p["symbol"] for p in open_positions}
+ eligible_candidates=[m for m in universe_scan["top_candidates"] if m["symbol"] not in held_symbols]
+ if not eligible_candidates:
+  auto_event("RISK_BLOCK",details="No unheld market candidates available for council review")
+  return {"actions":actions,"blocked":"No unheld market candidates","open_positions":len(open_positions)}
  council_attempted=False
- for market in universe_scan["top_candidates"]:
+ for market in eligible_candidates:
   symbol=market["symbol"]
   if council_attempted: break
   if len(open_positions)>=settings["max_open_positions"] or entries_today>=settings["max_trades_per_day"]: break
-  if any(p["symbol"]==symbol for p in open_positions):
-   auto_event("RISK_BLOCK",symbol,"Existing paper position in this symbol; duplicate entry skipped")
-   continue
   try:
    venues=await fetch_both_market_candles(symbol,"30m",120)
    cs=venues["binance"]
