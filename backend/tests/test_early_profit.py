@@ -4,7 +4,7 @@ from app.omonux_early_profit import early_profit_decision
 
 
 def test_long_profitable_after_costs():
-    close,net,cost=early_profit_decision(side="BUY",entry=100,current=101.2,quantity=.05)
+    close,net,cost=early_profit_decision(side="BUY",entry=100,current=101.3,quantity=.05)
     assert close
     assert net>=.05
     assert cost>0

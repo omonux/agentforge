@@ -726,6 +726,8 @@ def auto_event(kind,symbol=None,details=None,pnl=None):
   c.execute("INSERT INTO auto_trade_events VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),kind,symbol,details,pnl,stamp()))
 
 _paper_position_monitor_lock=asyncio.Lock()
+_paper_quote_failure_last_logged={}
+
 
 async def monitor_paper_positions():
  """Monitor open paper positions using promptly received public spot quotes.
@@ -744,9 +746,15 @@ async def monitor_paper_positions():
    try:
     if symbol not in prices:
      errors.append(symbol)
-     auto_event("PAPER_MONITOR_ERROR",symbol,"Fresh public price quote unavailable; position left unchanged")
+     now=asyncio.get_running_loop().time()
+     if now-_paper_quote_failure_last_logged.get(symbol,-1e9)>=300:
+      auto_event("PAPER_MONITOR_ERROR",symbol,"Both public quote sources unavailable; position unchanged; new entries blocked")
+      _paper_quote_failure_last_logged[symbol]=now
      continue
     price=prices[symbol]
+    if symbol in _paper_quote_failure_last_logged:
+     del _paper_quote_failure_last_logged[symbol]
+     auto_event("PAPER_MONITOR_RECOVERED",symbol,"Public quote monitoring resumed")
     # Stop takes priority. Do not trail first and then trigger the same quote.
     reason=paper_exit_reason(pos["side"],price,float(pos["stop_price"]),float(pos["target_price"]))
     early_close,estimated_net,estimated_cost=early_profit_decision(
@@ -755,7 +763,8 @@ async def monitor_paper_positions():
     if not reason and early_close:
      reason="EARLY_NET_PROFIT"
     if reason:
-     pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])*(1 if pos["side"]=="BUY" else -1)
+     # Estimated net after round-trip fees and slippage; paper only.
+     pnl=estimated_net
      with db() as conn:
       deleted=conn.execute("DELETE FROM auto_trade_positions WHERE id=?",(pos["id"],)).rowcount
      if deleted:
@@ -917,7 +926,7 @@ async def auto_paper_portfolio():
          "invested_at_cost":round(invested,4),"positions":holdings,
          "mark_to_market_complete":complete,"running":bool(auto_settings()["running"]),
          "decisions":[{"event":e["event_type"],"symbol":e["symbol"],"reason":e["details"],"pnl":e["pnl"],"time":e["created"]} for e in events[:30]],
-         "notice":"Paper-only simulation. Prices use completed market candles; fees and slippage are not modeled. No trade is guaranteed."}
+         "notice":"Paper-only simulation. Open P&L uses completed candles and is gross before fees; new exits estimate round-trip costs. Historical exits may use gross P&L. No profit is guaranteed."}
 
 @app.get("/api/v1/trading/auto/diagnostics")
 def auto_trade_diagnostics():
