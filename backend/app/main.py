@@ -6,6 +6,7 @@ from .omonux_fast_radar import scan_fast_radar
 from .omonux_profit_protection import trailing_stop
 from .omonux_stake_sizing import adaptive_paper_quantity
 from .omonux_fast_monitor import fetch_fresh_prices, paper_exit_reason
+from .omonux_early_profit import early_profit_decision
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_live_books import scan_live_books
@@ -748,12 +749,17 @@ async def monitor_paper_positions():
     price=prices[symbol]
     # Stop takes priority. Do not trail first and then trigger the same quote.
     reason=paper_exit_reason(pos["side"],price,float(pos["stop_price"]),float(pos["target_price"]))
+    early_close,estimated_net,estimated_cost=early_profit_decision(
+     side=pos["side"],entry=float(pos["entry_price"]),current=price,
+     quantity=float(pos["quantity"]))
+    if not reason and early_close:
+     reason="EARLY_NET_PROFIT"
     if reason:
      pnl=(price-float(pos["entry_price"]))*float(pos["quantity"])*(1 if pos["side"]=="BUY" else -1)
      with db() as conn:
       deleted=conn.execute("DELETE FROM auto_trade_positions WHERE id=?",(pos["id"],)).rowcount
      if deleted:
-      auto_event("PAPER_EXIT",symbol,f"{reason}; fast_quote_monitor; simulated_spot_price={price:.8f}",pnl)
+      auto_event("PAPER_EXIT",symbol,f"{reason}; fast_quote_monitor; simulated_spot_price={price:.8f}; estimated_net_pnl={estimated_net:.6f}; estimated_cost={estimated_cost:.6f}",pnl)
       closed+=1
      continue
     entry=float(pos["entry_price"]); old_stop=float(pos["stop_price"])
