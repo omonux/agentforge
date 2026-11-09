@@ -116,6 +116,7 @@ def build_signal(symbol: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
         "timeframe": "closed_candles",
         "side": side,
         "confidence": score,
+        "directional_confidence": 100 - score if side == "SELL" else score,
         "price": price,
         "indicators": {
             "ema_9": round(fast[i], 8),
