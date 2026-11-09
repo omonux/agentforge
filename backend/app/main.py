@@ -1,5 +1,6 @@
 import os, sqlite3, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal, validate_symbol
+from .omonux_backtest import backtest_closed_candles
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_council import run_council
@@ -1045,6 +1046,29 @@ app.include_router(workflow_runs_router)
 
 
 # OMONUX 50-market discovery API. Research-only; this route cannot place orders.
+class HistoricalBacktestRequest(BaseModel):
+ symbol: str = Field(default="BTCUSDT", pattern="^BTCUSDT$")
+ interval: str = Field(default="15m", pattern="^15m$")
+ limit: int = Field(default=500, ge=100, le=500)
+ fee_bps: float = Field(default=10, ge=0, le=100)
+ slippage_bps: float = Field(default=5, ge=0, le=100)
+
+@app.post("/api/v1/trading/backtest")
+async def trading_historical_backtest(x: HistoricalBacktestRequest):
+ try:
+  candles = await fetch_candles(x.symbol, x.interval, x.limit)
+  if len(candles) < 52:
+   raise HTTPException(503,"Not enough completed historical candles to run the backtest.")
+  result = backtest_closed_candles(x.symbol, candles, fee_bps=x.fee_bps, slippage_bps=x.slippage_bps)
+  return {**result,"interval":x.interval,"candles":len(candles),
+          "first_candle_time":candles[0]["time"],"last_candle_time":candles[-1]["time"],
+          "source":"Binance public historical closed candles",
+          "notice":"Historical research only; no real or paper order was placed. In-sample results are not proof of profitability."}
+ except ValueError as exc:
+  raise HTTPException(400,str(exc))
+ except httpx.HTTPError:
+  raise HTTPException(503,"Binance historical market data is currently unavailable.")
+
 class UniverseScanRequest(BaseModel):
  interval: str = Field(default="30m", pattern="^(5m|15m|30m|1h|4h|1d)$")
  max_symbols: int = Field(default=50, ge=1, le=50)
