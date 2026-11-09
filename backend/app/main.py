@@ -3,6 +3,7 @@ from .omonux_engine import fetch_candles, build_signal, validate_symbol
 from .omonux_backtest import backtest_closed_candles
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
+from .omonux_live_books import scan_live_books
 from .omonux_council import run_council
 from .omonux_research import router as omonux_research_router
 from pathlib import Path
@@ -1068,6 +1069,20 @@ async def trading_historical_backtest(x: HistoricalBacktestRequest):
   raise HTTPException(400,str(exc))
  except httpx.HTTPError:
   raise HTTPException(503,"Binance historical market data is currently unavailable.")
+
+class LiveBookResearchRequest(BaseModel):
+ symbols: list[str] = Field(default_factory=lambda:["BTCUSDT","ETHUSDT","SOLUSDT"],min_length=1,max_length=10)
+ fee_bps: float = Field(default=20,ge=0,le=100)
+ slippage_bps: float = Field(default=10,ge=0,le=100)
+ extra_cost_bps: float = Field(default=5,ge=0,le=100)
+
+@app.post("/api/v1/trading/orderbook/research")
+async def live_orderbook_research(x:LiveBookResearchRequest):
+ try:
+  return await scan_live_books(x.symbols,fee_bps=x.fee_bps,
+                               slippage_bps=x.slippage_bps,extra_cost_bps=x.extra_cost_bps)
+ except ValueError as exc:
+  raise HTTPException(400,str(exc))
 
 class UniverseScanRequest(BaseModel):
  interval: str = Field(default="30m", pattern="^(5m|15m|30m|1h|4h|1d)$")
