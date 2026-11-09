@@ -812,6 +812,32 @@ async def auto_paper_portfolio():
          "decisions":[{"event":e["event_type"],"symbol":e["symbol"],"reason":e["details"],"pnl":e["pnl"],"time":e["created"]} for e in events[:30]],
          "notice":"Paper-only simulation. Prices use completed market candles; fees and slippage are not modeled. No trade is guaranteed."}
 
+@app.get("/api/v1/trading/auto/diagnostics")
+def auto_trade_diagnostics():
+ """Explain recent paper entry outcomes from actual audit events, never inferred profits."""
+ events=rows("SELECT event_type,symbol,details,created FROM auto_trade_events ORDER BY created DESC LIMIT 300")
+ reasons={
+  "RISK_BLOCK":"Risk gate rejected an entry",
+  "MARKET_DATA_BLOCK":"Exchange data did not pass validation",
+  "CYCLE_ERROR":"Trading cycle encountered a provider or data error",
+  "SCHEDULER_ERROR":"Automatic scheduler encountered an error",
+  "COUNCIL_DECISION":"AI council evaluated a candidate",
+  "PAPER_ENTRY":"Simulated trade was opened",
+  "UNIVERSE_SCAN":"Market universe was scanned",
+  "ENGINE_STARTED":"Paper engine started",
+  "ENGINE_STOPPED":"Paper engine stopped",
+  "RISK_CHECK_ERROR":"Open-position risk valuation failed",
+ }
+ relevant=[{"type":e["event_type"],"symbol":e["symbol"],"reason":e["details"],
+            "meaning":reasons.get(e["event_type"],"Trading engine event"),
+            "time":e["created"]} for e in events if e["event_type"] in reasons]
+ latest=next((e for e in relevant if e["type"] in ("RISK_BLOCK","MARKET_DATA_BLOCK","CYCLE_ERROR","SCHEDULER_ERROR","COUNCIL_DECISION","PAPER_ENTRY")),None)
+ return {"engine_running":bool(auto_settings()["running"]),
+         "emergency_stopped":bool(trading_safety_status()["emergency_stopped"]),
+         "latest_outcome":latest,"recent_decisions":relevant[:60],
+         "paper_positions":len(rows("SELECT id FROM auto_trade_positions")),
+         "notice":"Only recorded audit events are shown. A manual council scan is research, not an automatic paper BUY. No live orders placed."}
+
 @app.get("/api/v1/trading/auto/events")
 def auto_trade_events():
  return rows("SELECT * FROM auto_trade_events ORDER BY created DESC LIMIT 300")
@@ -905,13 +931,19 @@ async def auto_trade_run_once():
     auto_event("MARKET_DATA_BLOCK",symbol,f"Cross-venue price divergence {divergence:.4f}% exceeds 0.35%")
     continue
    signal=build_signal(symbol,cs)
-   if signal["side"] not in ("BUY","SELL") or signal["directional_confidence"]<settings["min_confidence"]: continue
+   if signal["side"] not in ("BUY","SELL"):
+    auto_event("RISK_BLOCK",symbol,f"Technical signal is {signal['side']}; no BUY or SELL setup")
+    continue
+   if signal["directional_confidence"]<settings["min_confidence"]:
+    auto_event("RISK_BLOCK",symbol,f"Technical {signal['side']} confidence {signal['directional_confidence']} below configured minimum {settings['min_confidence']}")
+    continue
    # A 30m candle may be reviewed only once automatically. The scheduler
    # checks every five minutes, but this prevents repeated 12-call scans of
    # the same completed candle and controls provider usage.
    candle_time=int(cs[-1]["time"])
    last_scan=one("SELECT last_candle_time FROM council_scan_state WHERE id=1")
    if last_scan and int(last_scan["last_candle_time"]) >= candle_time:
+    auto_event("RISK_BLOCK",symbol,"This completed 30-minute candle was already reviewed; waiting for a new candle")
     continue
    council_attempted=True
    # The AI council is a second approval gate, not an execution authority.
