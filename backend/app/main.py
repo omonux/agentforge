@@ -1090,6 +1090,18 @@ async def auto_trade_run_once():
    if quantity<=0 or not all(map(lambda v: v>0,(price,stop,target))) or not ((stop<price<target) if signal["side"]=="BUY" else (target<price<stop)):
     auto_event("RISK_BLOCK",symbol,"Entry blocked: insufficient paper capital, invalid quantity or invalid stop/target geometry")
     continue
+   # Reject paper trades whose projected target does not cover modeled costs
+   # and provide at least 1.5x the modeled stop loss. This is an entry
+   # quality gate, not a forecast or guarantee of profitability.
+   notional=quantity*price
+   estimated_round_trip_cost=notional*0.002
+   projected_gross_reward=quantity*abs(target-price)
+   projected_gross_loss=quantity*abs(price-stop)
+   projected_net_reward=projected_gross_reward-estimated_round_trip_cost
+   projected_net_loss=projected_gross_loss+estimated_round_trip_cost
+   if projected_net_reward<0.05 or projected_net_reward<1.5*projected_net_loss:
+    auto_event("RISK_BLOCK",symbol,f"Net reward gate: projected_net_target={projected_net_reward:.4f}, modeled_stop_loss={projected_net_loss:.4f}; require >=$0.05 net and >=1.5x reward/risk")
+    continue
    ident=str(uuid.uuid4())
    # Serialize the final admission check across overlapping scheduler/API cycles.
    # Do not delete legacy duplicates: they remain independently managed.
