@@ -10,6 +10,7 @@ import asyncio
 from typing import Any
 
 from .omonux_engine import build_signal
+from .omonux_arbitrage_research import analyze_discrepancy
 from .omonux_exchange_market_data import fetch_both_market_candles
 
 # Curated, common USDT Spot pairs. Exchange listing/availability is verified at scan time.
@@ -49,6 +50,7 @@ async def scan_market_universe(
                     raise ValueError("Latest completed candle timestamps do not align.")
                 mid = (float(b["close"]) + float(y["close"])) / 2
                 divergence = abs(float(b["close"]) - float(y["close"])) / mid * 100 if mid else 999
+                discrepancy = analyze_discrepancy(float(b["close"]), float(y["close"]))
                 signal = build_signal(symbol, left)
                 eligible = divergence <= max_price_divergence_pct
                 score = signal["directional_confidence"] if signal["side"] in ("BUY", "SELL") and eligible else 0
@@ -58,6 +60,7 @@ async def scan_market_universe(
                     "confidence": signal["directional_confidence"], "rank_score": score,
                     "binance_price": b["close"], "bybit_price": y["close"],
                     "price_divergence_pct": round(divergence, 4),
+                    "discrepancy_research": discrepancy,
                     "candle_time": b["time"], "completed_candles": min(len(left), len(right)),
                     "eligible": eligible, "reason": None if eligible else "Venue price divergence exceeds safety threshold.",
                 }
