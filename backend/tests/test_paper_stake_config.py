@@ -15,7 +15,7 @@ def test_stake_cap_never_exceeds_ten_or_available_risk():
     qty,_=adaptive_paper_quantity(price=100,stop=90,equity=100,
         available_cash=100,risk_percent=1,max_notional_percent=100,
         confidence=99,max_stake=10)
-    assert qty*100<=1.0+1e-9
+    assert qty*100<=10.0+1e-9\n    assert qty*(100-90)<=1.0+1e-9
 
 
 def test_config_rejects_excessive_stake_or_positions():
