@@ -2,6 +2,7 @@ import os, sqlite3, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal, validate_symbol
 from .omonux_backtest import backtest_closed_candles
 from .omonux_challenge import challenge_report
+from .omonux_fast_radar import scan_fast_radar
 from .omonux_exchange_market_data import fetch_both_market_candles
 from .omonux_universe import UNIVERSE_SYMBOLS, scan_market_universe
 from .omonux_live_books import scan_live_books
@@ -408,6 +409,19 @@ async def omonux_market_compare(symbol: str, interval: str = "30m", limit: int =
   raise HTTPException(502,"Could not reach one or both exchanges. No comparison was produced.")
 
 # --- Omonux market data and signal research (closed candles; no execution) ---
+class FastRadarRequest(BaseModel):
+ symbols: list[str] = Field(default_factory=lambda: list(UNIVERSE_SYMBOLS)[:20], min_length=1, max_length=50)
+ fee_bps: float = Field(default=10, ge=0, le=1000)
+ slippage_bps: float = Field(default=5, ge=0, le=1000)
+
+@app.post("/api/v1/trading/radar/5m")
+async def five_minute_radar(req: FastRadarRequest):
+ """Read-only market screening; no automatic or real exchange execution."""
+ try:
+  return await scan_fast_radar(req.symbols,fee_bps=req.fee_bps,slippage_bps=req.slippage_bps)
+ except ValueError as exc:
+  raise HTTPException(400,str(exc))
+
 class FastPaperChallengeRequest(BaseModel):
  symbol: str = Field(default="BTCUSDT", min_length=2, max_length=20)
  starting_cash: float = Field(default=68.0, gt=0, le=100000)
