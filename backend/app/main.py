@@ -898,35 +898,59 @@ def auto_trade_stop():
  auto_event("ENGINE_STOPPED",details="Paper trading engine stopped")
  return auto_trade_status()
 
+@app.get("/api/v1/trading/auto/analytics")
+def auto_paper_analytics():
+ from .omonux_profit_intelligence import paper_performance
+ events=rows("SELECT id,event_type,created,pnl FROM auto_trade_events WHERE event_type='PAPER_EXIT' ORDER BY created,id")
+ return paper_performance([dict(e) for e in events])
+
+
 @app.get("/api/v1/trading/auto/portfolio")
 async def auto_paper_portfolio():
- """Independent $100 virtual account for the autonomous engine (not manual tickets)."""
- events=rows("SELECT * FROM auto_trade_events ORDER BY created DESC LIMIT 300")
+ """Read-only $100 virtual account valued with the same public quotes as the monitor."""
+ from .omonux_profit_intelligence import paper_performance
  positions=rows("SELECT * FROM auto_trade_positions ORDER BY opened DESC")
- realized=sum(float(e["pnl"] or 0) for e in rows("SELECT pnl FROM auto_trade_events WHERE event_type='PAPER_EXIT'"))
- holdings=[]; unrealized=0.0; invested=0.0; complete=True
+ exits=rows("SELECT id,event_type,created,pnl FROM auto_trade_events WHERE event_type='PAPER_EXIT' ORDER BY created,id")
+ performance=paper_performance([dict(e) for e in exits])
+ realized=performance["realized_pnl"]
+ symbols=list(dict.fromkeys(pos["symbol"] for pos in positions))
+ try:
+  quotes=await fetch_fresh_prices(symbols)
+ except (ValueError,httpx.HTTPError):
+  quotes={}
+ holdings=[]; unrealized=0.0; estimated_net_unrealized=0.0; invested=0.0
+ complete=True
  for pos in positions:
   entry=float(pos["entry_price"]); quantity=float(pos["quantity"])
   invested+=entry*quantity
-  record={"symbol":pos["symbol"],"side":pos["side"],"quantity":quantity,"entry_price":entry,"stop_price":pos["stop_price"],"target_price":pos["target_price"],"opened":pos["opened"],"mark_price":None,"unrealized_pnl":None}
-  try:
-   candles=await fetch_candles(pos["symbol"],"30m",60)
-   mark=float(candles[-1]["close"])
-   record["mark_price"]=mark
-   record["unrealized_pnl"]=round((mark-entry)*quantity*(1 if pos["side"]=="BUY" else -1),4)
-   unrealized+=(mark-entry)*quantity*(1 if pos["side"]=="BUY" else -1)
-  except (ValueError,httpx.HTTPError,IndexError,KeyError):
+  mark=quotes.get(pos["symbol"])
+  record={"symbol":pos["symbol"],"side":pos["side"],"quantity":quantity,
+          "entry_price":entry,"stop_price":pos["stop_price"],
+          "target_price":pos["target_price"],"opened":pos["opened"],
+          "mark_price":mark,"unrealized_pnl":None,"estimated_net_unrealized_pnl":None}
+  if mark is None:
    complete=False
+  else:
+   gross=(mark-entry)*quantity*(1 if pos["side"]=="BUY" else -1)
+   estimated_net=gross-quantity*(entry+mark)*0.001
+   record["unrealized_pnl"]=round(gross,4)
+   record["estimated_net_unrealized_pnl"]=round(estimated_net,4)
+   unrealized+=gross
+   estimated_net_unrealized+=estimated_net
   holdings.append(record)
  equity=100.0+realized+unrealized if complete else None
  return {"starting_balance":100.0,"realized_pnl":round(realized,4),
          "unrealized_pnl":round(unrealized,4) if complete else None,
+         "estimated_net_unrealized_pnl":round(estimated_net_unrealized,4) if complete else None,
          "equity":round(equity,4) if equity is not None else None,
+         "estimated_net_equity":round(100.0+realized+estimated_net_unrealized,4) if complete else None,
          "available_cash":round(100.0+realized-invested,4),
          "invested_at_cost":round(invested,4),"positions":holdings,
-         "mark_to_market_complete":complete,"running":bool(auto_settings()["running"]),
-         "decisions":[{"event":e["event_type"],"symbol":e["symbol"],"reason":e["details"],"pnl":e["pnl"],"time":e["created"]} for e in events[:30]],
-         "notice":"Paper-only simulation. Open P&L uses completed candles and is gross before fees; new exits estimate round-trip costs. Historical exits may use gross P&L. No profit is guaranteed."}
+         "mark_to_market_complete":complete,"price_source":"public_binance_ticker_price",
+         "running":bool(auto_settings()["running"]),
+         "analytics":{key:value for key,value in performance.items() if key!="equity_curve"},
+         "decisions":[{"event":e["event_type"],"symbol":e["symbol"],"reason":e["details"],"pnl":e["pnl"],"time":e["created"]} for e in rows("SELECT * FROM auto_trade_events ORDER BY created DESC LIMIT 30")],
+         "notice":"Paper-only. Public ticker quotes have no exchange timestamp; freshness at exchange is unverified. Missing quotes make equity unavailable. Estimated net open P&L uses 20 bps round-trip costs; historical realized P&L may be gross. No guaranteed profits."}
 
 @app.get("/api/v1/trading/auto/diagnostics")
 def auto_trade_diagnostics():
