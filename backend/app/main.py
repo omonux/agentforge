@@ -975,7 +975,10 @@ async def auto_trade_run_once():
  actions=[]
  # Open positions are managed independently every 10 seconds by the fast
  # paper monitor; the AI council stays on its five-minute entry cadence.
- await monitor_paper_positions()
+ monitor_result=await monitor_paper_positions()
+ if monitor_result["errors"]:
+  auto_event("RISK_BLOCK",details="Existing-position market data unavailable; no new paper entries")
+  return {"actions":actions,"blocked":"Existing-position market data unavailable; no new position opened","open_positions":len(rows("SELECT * FROM auto_trade_positions"))}
  open_positions=rows("SELECT * FROM auto_trade_positions")
  if len(open_positions)>=settings["max_open_positions"]:
   auto_event("RISK_BLOCK",details="Maximum open positions reached")
