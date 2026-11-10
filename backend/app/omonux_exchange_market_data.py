@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from .omonux_engine import INTERVALS, validate_symbol
+from .omonux_engine import INTERVALS, validate_symbol, fetch_candles
 
 BINANCE = "https://api.binance.com"
 BYBIT = "https://api.bybit.com"
@@ -89,15 +89,9 @@ async def fetch_market_candles(
 
     async with httpx.AsyncClient(timeout=15) as client:
         if venue == "binance":
-            response = await client.get(
-                f"{BINANCE}/api/v3/klines",
-                params={"symbol": market, "interval": interval, "limit": count},
-            )
-            response.raise_for_status()
-            raw = response.json()
-            if not isinstance(raw, list):
-                raise ValueError("Binance returned an unexpected candle response.")
-            candles = _normalize_binance(raw, now_ms)
+            # Use the same bounded/coalesced Binance client as signal research.
+            # A rate-limit response pauses new paper entries rather than retrying.
+            return await fetch_candles(market, interval, count)
         else:
             response = await client.get(
                 f"{BYBIT}/v5/market/kline",
