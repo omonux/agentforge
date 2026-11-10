@@ -47,7 +47,7 @@ def test_valid_stop_geometry_is_preflight_only():
     ({**SPEC, "specSource": "cache"}, QUOTE, "BUY", 1.09980),
     ({**SPEC, "tickValueAccount": None}, QUOTE, "BUY", 1.09980),
     (SPEC, {**QUOTE, "ask": None}, "BUY", 1.09980),
-]):
+])
 def test_stop_validation_fails_closed(spec, quote, side, stop):
     with pytest.raises(p.PreflightRejected):
         p.validate_protective_stop(spec, quote, side=side, stop_loss=stop)
