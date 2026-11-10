@@ -177,6 +177,29 @@ async def forex_account(account_id: str | None = None):
         raise HTTPException(503, "TickerAll account unavailable") from exc
 
 
+@router.get("/preflight/session")
+async def forex_session_preflight():
+    """Read-only broker session verification. Never authorizes execution."""
+    from .forex_demo_preflight import _read, validate_session, PreflightRejected
+    from .tickerall_demo_transport import BrokerUnavailable
+    try:
+        account_id = _account_id()
+        roster = await _read("/v1/accounts")
+        account = await _read("/v1/accounts/" + account_id)
+        result = validate_session(account, roster, account_id)
+        return {"account_id": account_id, "session_ready": result["session_ready"],
+                "verified_demo": result["verified_demo"],
+                "open_positions": result["open_positions"],
+                "trading_permission_verified": False,
+                "protective_stop_verified": False,
+                "execution_enabled": False,
+                "next_step": "Verify broker symbol specification, fresh quote, stop loss, trading permission and durable reconciliation before any order."}
+    except (ValueError, PreflightRejected, BrokerUnavailable) as exc:
+        raise HTTPException(422, "MT5 session preflight blocked: " + str(exc)) from exc
+    except (httpx.HTTPError, TypeError, AttributeError) as exc:
+        raise HTTPException(503, "TickerAll session preflight unavailable; broker execution remains disabled") from exc
+
+
 @router.get("/candles/{symbol}")
 async def forex_candles(symbol: str, timeframe: str = "M30", hours: int = 72):
     market = symbol.upper()
