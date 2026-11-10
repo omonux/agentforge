@@ -42,11 +42,46 @@ def test_jpy_and_short():
 
 
 def test_status_no_secrets(monkeypatch):
-    monkeypatch.setenv("METAAPI_TOKEN","sensitive-test-token")
-    monkeypatch.setenv("METAAPI_ACCOUNT_ID","secret-account")
-    monkeypatch.setenv("METAAPI_PRICE_URL_TEMPLATE","https://mt-client-api-v1.new-york.agiliumtrade.ai/x/{account_id}/{symbol}")
-    r=TestClient(app).get("/api/v1/trading/forex/status")
-    assert r.status_code==200
-    assert r.json()["execution_enabled"] is False
-    assert "sensitive-test-token" not in r.text
-    assert "secret-account" not in r.text
+    monkeypatch.setenv("TICKERALL_API_KEY","sensitive-test-token")
+    monkeypatch.setenv("TICKERALL_ACCOUNT_ID","acc_example123")
+    from app.omonux_forex import forex_status
+    status = forex_status()
+    assert status["feed_configured"] is True
+    assert status["account_configured"] is True
+    assert status["execution_enabled"] is False
+    assert "sensitive-test-token" not in str(status)
+
+
+def test_account_id_validation(monkeypatch):
+    from app.omonux_forex import _account_id
+    monkeypatch.setenv("TICKERALL_ACCOUNT_ID","https://evil.example")
+    with pytest.raises(ValueError,match="TICKERALL_ACCOUNT_ID"):
+        _account_id()
+
+
+def test_tickerall_auth_header_and_read_only(monkeypatch):
+    import asyncio
+    import httpx
+    from app.omonux_forex import _tickerall_get
+    seen=[]
+    async def fake_get(self,url,params=None,headers=None):
+        seen.append((url,params,headers))
+        return httpx.Response(200,json=[],request=httpx.Request("GET",url))
+    monkeypatch.setenv("TICKERALL_API_KEY","secret-test-token")
+    monkeypatch.setattr(httpx.AsyncClient,"get",fake_get)
+    assert asyncio.run(_tickerall_get("/v1/accounts"))==[]
+    assert seen[0][0]=="https://api.tickerall.com/v1/accounts"
+    assert seen[0][2]["Authorization"]=="Bearer secret-test-token"
+    assert len(seen)==1
+
+
+def test_tickerall_rejects_cold_session(monkeypatch):
+    import asyncio
+    import httpx
+    from app.omonux_forex import _tickerall_get
+    async def fake_get(self,url,params=None,headers=None):
+        return httpx.Response(409,request=httpx.Request("GET",url))
+    monkeypatch.setenv("TICKERALL_API_KEY","test-token")
+    monkeypatch.setattr(httpx.AsyncClient,"get",fake_get)
+    with pytest.raises(ValueError,match="cold"):
+        asyncio.run(_tickerall_get("/v1/accounts"))
