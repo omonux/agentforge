@@ -1,37 +1,29 @@
 import {useEffect,useState} from "react";
 import {apiFetch,API} from "./api";
-
-type ForexStatus={feed_configured:boolean;execution_enabled:boolean;mode:string;markets:string[];next_step:string};
+type Status={feed_configured:boolean;account_configured:boolean;execution_enabled:boolean;next_step:string};
+type Account={id:string;broker?:string;server?:string;is_demo?:boolean;status?:string;hot?:boolean};
 export default function OmonuxForex(){
- const [status,setStatus]=useState<ForexStatus|null>(null);
- const [symbol,setSymbol]=useState("EURUSD");
- const [side,setSide]=useState("BUY");
- const [quote,setQuote]=useState<any>(null);
- const [preview,setPreview]=useState<any>(null);
+ const [status,setStatus]=useState<Status|null>(null);
+ const [accounts,setAccounts]=useState<Account[]>([]);
+ const [candles,setCandles]=useState<any>(null);
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
+ const [symbol,setSymbol]=useState("EURUSD");
  useEffect(()=>{apiFetch(API+"/api/v1/trading/forex/status").then(async r=>{if(r.ok)setStatus(await r.json())}).catch(()=>setError("Forex service unavailable"))},[]);
- async function loadQuote(){setBusy(true);setError("");setQuote(null);setPreview(null);try{
-  const r=await apiFetch(API+"/api/v1/trading/forex/quote/"+symbol);
-  const d=await r.json();if(!r.ok)throw Error(d.detail||"Quote unavailable");setQuote(d);
- }catch(e){setError(e instanceof Error?e.message:"Quote unavailable")}finally{setBusy(false)}}
- async function makePreview(){setBusy(true);setError("");setPreview(null);try{
-  const r=await apiFetch(API+"/api/v1/trading/forex/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol,side,stop_pips:20,confidence:85,risk_percent:0.5})});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||"Paper preview unavailable");setPreview(d);
- }catch(e){setError(e instanceof Error?e.message:"Preview unavailable")}finally{setBusy(false)}}
+ async function get(path:string,apply:(value:any)=>void){
+  setBusy(true);setError("");try{const r=await apiFetch(API+path);const data=await r.json();if(!r.ok)throw Error(typeof data.detail==="string"?data.detail:"TickerAll request failed");apply(data)}
+  catch(e){setError(e instanceof Error?e.message:"Connection failed")}finally{setBusy(false)}
+ }
  return <section className="omx-auto-section" style={{marginTop:24}}>
-  <h2>Forex Intelligence · MetaTrader 5 / MetaApi</h2>
-  <p className="muted">Integrated with AgentForge Crypto. Forex V1 is read-only market research and paper previews; no real broker orders or autonomous Forex entries.</p>
-  <p><b>Broker feed:</b> {status?.feed_configured?"Configured — validate live quotes below":"Not connected yet"} · <b>Real execution:</b> Disabled</p>
-  <div className="omx-auto-grid">
-   <label>Currency pair<select value={symbol} onChange={e=>{setSymbol(e.target.value);setQuote(null);setPreview(null)}}><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option><option value="USDJPY">USD/JPY</option></select></label>
-   <label>Paper direction<select value={side} onChange={e=>setSide(e.target.value)}><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label>
-  </div>
-  <div className="actions"><button className="secondary" disabled={busy} onClick={loadQuote}>Check MT5 quote</button><button className="secondary" disabled={busy||!status?.feed_configured} onClick={makePreview}>Preview paper trade</button></div>
+  <h2>Forex Intelligence · TickerAll + MT5</h2>
+  <p className="muted">AgentForge Connect API · Read-only Forex integration. Your API key stays in Render, never in this browser or the GitHub repository.</p>
+  <p><b>API key:</b> {status?.feed_configured?"Configured in Render":"Not configured"} · <b>MT5 account ID:</b> {status?.account_configured?"Configured":"Not configured"} · <b>Broker order execution:</b> Disabled</p>
+  <div className="actions"><button className="secondary" disabled={busy||!status?.feed_configured} onClick={()=>get("/api/v1/trading/forex/accounts",d=>setAccounts(d.accounts))}>Check TickerAll connection</button><button className="secondary" disabled={busy||!status?.account_configured} onClick={()=>get("/api/v1/trading/forex/account",d=>setAccounts([{id:"Configured demo account",broker:d.broker,server:d.server,is_demo:d.is_demo,status:d.status}]))}>Verify demo account</button></div>
+  {accounts.map(a=><div className="taskrow" key={a.id}><span><b>{a.broker||"MT5"} · {a.server||"Broker"}</b><small>Account ID: {a.id} · {a.is_demo?"DEMO":"Not verified as demo"} · {a.status||"Unknown"} · {a.hot===false?"Session cold":"Session state not checked"}</small></span></div>)}
+  <div className="omx-auto-grid"><label>Forex pair<select value={symbol} onChange={e=>{setSymbol(e.target.value);setCandles(null)}}><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option><option value="USDJPY">USD/JPY</option></select></label></div>
+  <div className="actions"><button className="secondary" disabled={busy||!status?.account_configured} onClick={()=>get("/api/v1/trading/forex/candles/"+symbol+"?timeframe=M30&hours=72",setCandles)}>Test 30-minute candles</button></div>
+  {candles&&<p role="status">TickerAll closed candles validated: {candles.count} for {candles.symbol}. Research only; no orders placed.</p>}
   {error&&<p role="alert">{error}</p>}
-  {quote&&<p>Bid: {quote.bid} · Ask: {quote.ask} · Spread: {quote.spread_pips} pips · Quote age: {quote.quote_age_seconds}s</p>}
-  {preview&&<div className="omx-cycle-result"><b>Paper preview only — no order placed</b><p>{preview.side} {preview.symbol} · Entry {preview.entry} · Stop {preview.stop} · Target {preview.target} · Units {preview.units}</p><p>{preview.notice}</p></div>}
-  {!status?.feed_configured&&<p className="muted">To connect: set METAAPI_TOKEN, METAAPI_ACCOUNT_ID and METAAPI_PRICE_URL_TEMPLATE as server environment secrets. MT5 desktop terminal is not installed on Render.</p>}
-  <p className="muted">Safeguards: 30-second quote freshness, maximum 2-pip spread, minimum 85 confidence for previews, 0.5% default risk, $10 paper notional cap, and no leverage. Profit is never guaranteed.</p>
+  <div className="guard">Render → AgentForge web service → Environment: add TICKERALL_API_KEY (secret). Click Check TickerAll connection, copy the acc_... ID for your demo account into TICKERALL_ACCOUNT_ID in Render, then redeploy. Never paste secrets into chat. Only demo accounts and read-only requests are supported. No live trading.</div>
  </section>;
 }
