@@ -6,7 +6,8 @@ No broker writes; passing preflight is not permission to place orders.
 from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from .tickerall_demo_transport import _id, _request, BrokerUnavailable
+from .tickerall_demo_transport import _id, _headers, BASE, BrokerUnavailable
+import httpx
 
 class PreflightRejected(ValueError):
     pass
@@ -88,20 +89,29 @@ def validate_protective_stop(spec: dict, quote: dict, *, side: str, stop_loss: A
             "quote_timestamp_verified": False,
             "trade_authorized": False}
 
+async def _read(path: str) -> Any:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+        response = await client.get(BASE + path, headers=_headers())
+    if response.status_code >= 400:
+        raise BrokerUnavailable(f"TickerAll preflight HTTP {response.status_code}")
+    if "application/json" not in response.headers.get("content-type", ""):
+        raise BrokerUnavailable("TickerAll returned non-JSON preflight response")
+    return response.json()
+
 async def read_only_demo_preflight(account_id: str, symbol: str, side: str, stop_loss: Any) -> dict:
     account_id = _id(account_id)
     if not isinstance(symbol, str) or not symbol.isascii() or not symbol.replace("_", "").isalnum():
         raise PreflightRejected("Invalid broker symbol")
-    roster = await _request("GET", "/v1/accounts")
+    roster = await _read("/v1/accounts")
     if not isinstance(roster, list):
         raise PreflightRejected("Invalid account roster")
-    account = await _request("GET", f"/v1/accounts/{account_id}")
+    account = await _read(f"/v1/accounts/{account_id}")
     session = validate_session(account, roster, account_id)
-    symbols = await _request("GET", f"/v1/accounts/{account_id}/symbols")
+    symbols = await _read(f"/v1/accounts/{account_id}/symbols")
     if not isinstance(symbols.get("symbols"), list) or symbol not in symbols["symbols"]:
         raise PreflightRejected("Symbol not available on broker")
-    spec_result = await _request("GET", f"/v1/accounts/{account_id}/symbols/{symbol}/spec")
-    quote = await _request("GET", f"/v1/accounts/{account_id}/symbols/{symbol}/quote")
+    spec_result = await _read(f"/v1/accounts/{account_id}/symbols/{symbol}/spec")
+    quote = await _read(f"/v1/accounts/{account_id}/symbols/{symbol}/quote")
     spec = spec_result.get("spec")
     stop = validate_protective_stop(spec, quote, side=side, stop_loss=stop_loss)
     return {**session, **stop, "symbol": symbol,
