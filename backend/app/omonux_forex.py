@@ -86,7 +86,7 @@ def paper_plan(quote: Quote, *, side: str, stop_pips: float,
 import re
 
 TICKERALL_BASE = "https://api.tickerall.com"
-_ACCOUNT_RE = re.compile(r"^acc_[A-Za-z0-9_-]{2,128}$")
+_ACCOUNT_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
 
 def _feed_configured() -> bool:
@@ -112,7 +112,7 @@ async def _tickerall_get(path: str, params: dict | None = None):
 def _account_id() -> str:
     account_id = os.getenv("TICKERALL_ACCOUNT_ID", "")
     if not _ACCOUNT_RE.fullmatch(account_id):
-        raise ValueError("Set TICKERALL_ACCOUNT_ID in Render using the acc_... ID from TickerAll")
+        raise ValueError("Set TICKERALL_ACCOUNT_ID in Render using the account ID returned by TickerAll")
     return account_id
 
 
