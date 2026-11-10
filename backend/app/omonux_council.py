@@ -31,7 +31,9 @@ SPECIALISTS = [
 _ALLOWED = {"BUY", "SELL", "HOLD"}
 
 
-def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]], signal: dict[str, Any], multi_timeframe_candles: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]], signal: dict[str, Any], multi_timeframe_candles: dict[str, list[dict[str, Any]]] | None = None, market_type: str = "crypto") -> dict[str, Any]:
+    if market_type not in {"crypto", "forex"}:
+        raise ValueError("Unsupported market type")
     closes = [float(c["close"]) for c in candles]
     volumes = [float(c.get("volume", 0)) for c in candles]
     recent = candles[-20:]
@@ -58,7 +60,8 @@ def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]],
     return {
         "symbol": symbol,
         "timeframe": timeframe,
-        "data_source": "Binance public OHLCV",
+        "data_source": "Binance public OHLCV" if market_type == "crypto" else "verified MT5 Forex completed candles",
+        "market_type": market_type,
         "closed_candle_count": len(candles),
         "latest_closed_candle_time_ms": candles[-1]["time"],
         "latest_price": closes[-1],
@@ -71,7 +74,8 @@ def _market_evidence(symbol: str, timeframe: str, candles: list[dict[str, Any]],
         "multi_timeframe_summaries": timeframe_summaries,
         "limitations": [
             "Only completed candles are supplied.",
-            "No order-book depth, spread, funding, open interest or verified news feed is available.",
+            "No verified news feed or independently verified execution liquidity is available.",
+            "Forex tick volume, if present, is not centralized market-wide traded volume." if market_type == "forex" else "No order-book depth, spread, funding or open interest is available.",
             "No other timeframe is fetched unless explicitly supplied.",
             "This is not a prediction or guarantee of future returns.",
         ],
@@ -126,9 +130,10 @@ async def _run_specialist(
     evidence: dict[str, Any],
     semaphore: asyncio.Semaphore,
     direction: str = "BUY",
+    market_type: str = "crypto",
 ) -> dict[str, Any]:
     system = (
-        f"You are the {name}, one independent specialist in a twelve-agent crypto market research council. "
+        f"You are the {name}, one independent specialist in a twelve-agent {market_type} market research council. "
         f"{task} You are an analyst, not an execution system. Never invent market/news/order-book data. "
         "Use only the supplied evidence. BUY supports a long candidate; SELL supports a short candidate; "
         "HOLD means uncertain or insufficient. Evaluate the proposed direction: " + direction + ". "
@@ -192,19 +197,20 @@ async def run_council(
     api_key: str,
     model: str,
     multi_timeframe_candles: dict[str, list[dict[str, Any]]] | None = None,
+    market_type: str = "crypto",
 ) -> dict[str, Any]:
     """Run all twelve specialists; fail closed if any specialist fails."""
     if not (base_url and api_key and model):
         raise RuntimeError("AI provider is not configured; the twelve-agent council cannot run.")
     if len(candles) < 40:
         raise ValueError("The council requires at least 40 completed candles.")
-    evidence = _market_evidence(symbol, timeframe, candles, signal, multi_timeframe_candles)
+    evidence = _market_evidence(symbol, timeframe, candles, signal, multi_timeframe_candles, market_type)
     timeout = httpx.Timeout(75.0, connect=10.0)
     semaphore = asyncio.Semaphore(2)
     async with httpx.AsyncClient(timeout=timeout) as client:
         results = await asyncio.gather(
             *[
-                _run_specialist(client, base_url, api_key, model, sid, name, task, evidence, semaphore, signal["side"])
+                _run_specialist(client, base_url, api_key, model, sid, name, task, evidence, semaphore, signal["side"], market_type)
                 for sid, name, task in SPECIALISTS
             ],
             return_exceptions=True,
