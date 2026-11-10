@@ -52,7 +52,8 @@ async def get_demo_account(account_id: str) -> dict[str, Any]:
     if not isinstance(account, dict):
         raise BrokerUnavailable("Missing broker account details")
     # The provider must affirmatively mark the account as demo.
-    if account.get("isDemo") is not True and account.get("is_demo") is not True:
+    if (data.get("isDemo") is not True and data.get("is_demo") is not True
+            and account.get("isDemo") is not True and account.get("is_demo") is not True):
         raise BrokerUnavailable("Broker account not affirmatively verified as demo")
     return data
 
