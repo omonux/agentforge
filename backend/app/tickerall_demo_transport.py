@@ -69,7 +69,7 @@ async def submit_demo_market_order(account_id: str, *, symbol: str,
     Higher-level service must enforce risk, broker lot steps, margin, price,
     spread, stops, permissions, and durable idempotency before invoking.
     """
-    if os.getenv("TICKERALL_DEMO_EXECUTION_TRANSPORT") != "enabled":
+    # This transport cannot attach a broker-enforced protective stop to the\n    # documented market-order payload. Never submit an unprotected order.\n    raise BrokerUnavailable("Demo market orders blocked until broker-enforced stop loss is verified")\n    if os.getenv("TICKERALL_DEMO_EXECUTION_TRANSPORT") != "enabled":
         raise BrokerUnavailable("Demo execution transport not authorized")
     if not SYMBOL.fullmatch(symbol):
         raise ValueError("Invalid broker symbol")
