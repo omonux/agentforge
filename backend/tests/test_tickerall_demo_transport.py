@@ -45,3 +45,13 @@ def test_unverified_demo_flag_fails_closed(monkeypatch):
     monkeypatch.setattr(broker, "_request", unknown)
     with pytest.raises(broker.BrokerUnavailable, match="demo"):
         asyncio.run(broker.get_demo_account("cmwb1b0fi0kaio9012c9azw6n"))
+
+def test_even_enabled_transport_never_submits_unprotected_order(monkeypatch):
+    monkeypatch.setenv("TICKERALL_DEMO_EXECUTION_TRANSPORT", "enabled")
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Broker network request must not happen")
+    monkeypatch.setattr(broker, "_request", forbidden)
+    with pytest.raises(broker.BrokerUnavailable, match="stop loss"):
+        asyncio.run(broker.submit_demo_market_order(
+            "cmwb1b0fi0kaio9012c9azw6n", symbol="EURUSD", side="BUY",
+            volume=0.01, idempotency_key=str(uuid.uuid4())))
