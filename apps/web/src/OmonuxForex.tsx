@@ -8,6 +8,7 @@ export default function OmonuxForex(){
  const [selectedAccountId,setSelectedAccountId]=useState("");
  const [verified,setVerified]=useState(false);
  const [candles,setCandles]=useState<any>(null);
+ const [research,setResearch]=useState<any>(null);
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
  const [symbol,setSymbol]=useState("EURUSD");
@@ -38,8 +39,10 @@ export default function OmonuxForex(){
   {accounts.map(a=><div className="taskrow" key={a.id}><span><b>{a.broker||"MT5"} · {a.server||"Broker"}</b><small>Account ID: {a.id} · {a.is_demo?"DEMO":"Not verified as demo"} · {a.status||"Unknown"} · {a.hot===false?"Session cold":"Session state not checked"}</small></span></div>)}
   {accounts.filter(a=>a.is_demo).length>1&&<label>Demo account <select value={selectedAccountId} onChange={e=>{setSelectedAccountId(e.target.value);setVerified(false)}}>{accounts.filter(a=>a.is_demo).map(a=><option key={a.id} value={a.id}>{a.server||"MT5"} · {a.id}</option>)}</select></label>}
   {verified&&<p role="status">Demo account verified successfully. Broker execution remains disabled.</p>}
-  <div className="omx-auto-grid"><label>Forex pair<select value={symbol} onChange={e=>{setSymbol(e.target.value);setCandles(null)}}><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option><option value="USDJPY">USD/JPY</option></select></label></div>
+  <div className="omx-auto-grid"><label>Forex pair<select value={symbol} onChange={e=>{setSymbol(e.target.value);setCandles(null);setResearch(null)}}><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option><option value="USDJPY">USD/JPY</option></select></label></div>
   <div className="actions"><button className="secondary" disabled={busy||!status?.account_configured} onClick={()=>get("/api/v1/trading/forex/candles/"+symbol+"?timeframe=M30&hours=72",setCandles)}>Test 30-minute candles</button></div>
+  <div className="actions"><button className="secondary" disabled={busy||!status?.account_configured} onClick={()=>get("/api/v1/trading/forex/research/"+symbol+"?timeframe=M30&hours=168",setResearch)}>Run 12-agent Forex research</button></div>
+  {research&&<div className="taskrow"><span><b>Forex research · {research.symbol} · {research.timeframe}</b><small>Direction: {research.signal?.side||"HOLD"} · Council: {research.council?.decision||research.decision||"NO_TRADE"} · Votes: {research.council?.supporting_votes??0}/12 · Completed agents: {research.council?.completed_agents??0}/12 · No broker order placed</small>{Array.isArray(research.council?.agents)&&research.council.agents.map((a:any)=><small key={a.id}>{a.name}: {a.stance} · {a.status} · {a.reason}</small>)}</span></div>}
   {candles&&<p role="status">TickerAll closed candles validated: {candles.count} for {candles.symbol}. Research only; no orders placed.</p>}
   {error&&<p role="alert">{error}</p>}
   <div className="guard">Render → AgentForge web service → Environment: add TICKERALL_API_KEY (secret). Click Check TickerAll connection, then Verify demo account. Copy the returned account ID exactly into TICKERALL_ACCOUNT_ID in Render, then redeploy. Never paste secrets into chat. Only demo accounts and read-only requests are supported. No live trading.</div>
