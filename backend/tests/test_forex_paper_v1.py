@@ -52,6 +52,13 @@ def test_status_no_secrets(monkeypatch):
     assert "sensitive-test-token" not in str(status)
 
 
+def test_real_tickerall_account_id(monkeypatch):
+    from app.omonux_forex import _account_id, forex_status
+    monkeypatch.setenv("TICKERALL_ACCOUNT_ID", "cmwb1b0fi0kaio9012c9azw6n")
+    assert _account_id() == "cmwb1b0fi0kaio9012c9azw6n"
+    assert forex_status()["account_configured"] is True
+
+
 def test_account_id_validation(monkeypatch):
     from app.omonux_forex import _account_id
     monkeypatch.setenv("TICKERALL_ACCOUNT_ID","https://evil.example")
