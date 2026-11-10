@@ -22,32 +22,84 @@ def validate_symbol(symbol: str) -> str:
     return value
 
 
+# Shared process-local Binance candle cache and rate-limit circuit breaker.
+# Concurrent callers share one in-flight request per symbol/timeframe/limit.
+import asyncio
+import time
+
+_CANDLE_CACHE: dict[tuple, tuple[float, list]] = {}
+_CANDLE_TASKS: dict[tuple, asyncio.Task] = {}
+_CANDLE_LOCK = asyncio.Lock()
+_BINANCE_COOLDOWN_UNTIL = 0.0
+_BINANCE_SEMAPHORE = asyncio.Semaphore(2)
+_CANDLE_TTL_SECONDS = 90.0
+_BINANCE_DEFAULT_BACKOFF_SECONDS = 90.0
+
+
+def _rate_limit_seconds(response: httpx.Response) -> float:
+    retry_after = response.headers.get("Retry-After", "")
+    try:
+        return min(300.0, max(30.0, float(retry_after)))
+    except (ValueError, OverflowError):
+        return _BINANCE_DEFAULT_BACKOFF_SECONDS
+
+
+async def _load_binance_candles(key: tuple) -> list[dict[str, Any]]:
+    global _BINANCE_COOLDOWN_UNTIL
+    symbol, interval, limit = key
+    async with _BINANCE_SEMAPHORE:
+        if time.monotonic() < _BINANCE_COOLDOWN_UNTIL:
+            raise ValueError("Binance candle rate-limit cooldown active; no fresh candle data available")
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{BINANCE}/api/v3/klines",
+                params={"symbol": symbol, "interval": interval, "limit": limit},
+            )
+            if response.status_code in (429, 418):
+                _BINANCE_COOLDOWN_UNTIL = time.monotonic() + _rate_limit_seconds(response)
+                raise ValueError("Binance candle rate limit reached; cooling down before new requests")
+            response.raise_for_status()
+            raw = response.json()
+        if not isinstance(raw, list) or len(raw) < 2:
+            raise ValueError("Binance returned insufficient candle data")
+        closed = raw[:-1]
+        candles = [
+            {"time": int(row[0]), "open": float(row[1]),
+             "high": float(row[2]), "low": float(row[3]),
+             "close": float(row[4]), "volume": float(row[5]),
+             "close_time": int(row[6])}
+            for row in closed
+        ]
+        # Never cache failures. Cached candles are only reused for a short period.
+        _CANDLE_CACHE[key] = (time.monotonic() + _CANDLE_TTL_SECONDS, candles)
+        if len(_CANDLE_CACHE) > 500:
+            for old_key, (expires, _) in list(_CANDLE_CACHE.items()):
+                if expires <= time.monotonic():
+                    _CANDLE_CACHE.pop(old_key, None)
+        return candles
+
+
 async def fetch_candles(symbol: str, interval: str = "30m", limit: int = 120) -> list[dict[str, Any]]:
     symbol = validate_symbol(symbol)
     if interval not in INTERVALS:
         raise ValueError("Unsupported timeframe. Choose 5m, 15m, 30m, 1h, 4h or 1d.")
     limit = max(30, min(int(limit), 500))
-    async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.get(
-            f"{BINANCE}/api/v3/klines",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
-        )
-        response.raise_for_status()
-        raw = response.json()
-    # Binance includes the currently-forming candle as the final row.
-    closed = raw[:-1]
-    return [
-        {
-            "time": int(row[0]),
-            "open": float(row[1]),
-            "high": float(row[2]),
-            "low": float(row[3]),
-            "close": float(row[4]),
-            "volume": float(row[5]),
-            "close_time": int(row[6]),
-        }
-        for row in closed
-    ]
+    key = (symbol, interval, limit)
+    async with _CANDLE_LOCK:
+        # Fail closed during cooldown, including for cached data: the entry
+        # engine must not treat pre-limit candles as fresh market evidence.
+        if time.monotonic() < _BINANCE_COOLDOWN_UNTIL:
+            raise ValueError("Binance candle rate-limit cooldown active; new entries paused")
+        cached = _CANDLE_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        task = _CANDLE_TASKS.get(key)
+        if task is None:
+            task = asyncio.create_task(_load_binance_candles(key))
+            _CANDLE_TASKS[key] = task
+            task.add_done_callback(lambda done, k=key: _CANDLE_TASKS.pop(k, None)
+                                   if _CANDLE_TASKS.get(k) is done else None)
+    return await asyncio.shield(task)
 
 
 def ema(values: list[float], period: int) -> list[float]:
