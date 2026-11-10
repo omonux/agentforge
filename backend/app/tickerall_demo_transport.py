@@ -64,11 +64,7 @@ async def list_broker_symbols(account_id: str) -> dict[str, Any]:
 async def submit_demo_market_order(account_id: str, *, symbol: str,
                                    side: str, volume: float,
                                    idempotency_key: str) -> dict[str, Any]:
-    """Low-level demo transport only; not exposed as a route or auto trader.
-
-    Higher-level service must enforce risk, broker lot steps, margin, price,
-    spread, stops, permissions, and durable idempotency before invoking.
-    """
+    """Fail-closed transport: broker-enforced stop-loss capability unverified."""
     if os.getenv("TICKERALL_DEMO_EXECUTION_TRANSPORT") != "enabled":
         raise BrokerUnavailable("Demo execution transport not authorized")
     if not SYMBOL.fullmatch(symbol):
@@ -81,8 +77,7 @@ async def submit_demo_market_order(account_id: str, *, symbol: str,
         uuid.UUID(idempotency_key)
     except (ValueError, TypeError, AttributeError):
         raise ValueError("Invalid idempotency key") from None
-    await get_demo_account(account_id)
-    return await _request("POST", f"/v1/accounts/{_id(account_id)}/orders",
-                          payload={"type": "market", "symbol": symbol,
-                                   "side": side, "volume": volume},
-                          idempotency_key=idempotency_key)
+    _id(account_id)
+    # Provider order payload has no verified broker-enforced protective stop.
+    # No order POST is reachable until a safe broker contract is implemented.
+    raise BrokerUnavailable("Demo market orders blocked until broker-enforced stop loss is verified")

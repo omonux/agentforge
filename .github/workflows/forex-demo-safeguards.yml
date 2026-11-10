@@ -1,0 +1,25 @@
+name: Forex demo safeguards
+on:
+  pull_request:
+    paths:
+      - 'backend/app/forex_demo_*.py'
+      - 'backend/app/tickerall_demo_transport.py'
+      - 'backend/tests/test_forex_demo_*.py'
+      - 'backend/tests/test_tickerall_demo_transport.py'
+      - '.github/workflows/forex-demo-safeguards.yml'
+  workflow_dispatch:
+jobs:
+  offline-risk-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest
+        run: python -m pip install pytest httpx
+      - name: Run offline safeguard tests
+        run: python -m pytest -q tests/test_forex_demo_risk.py tests/test_forex_demo_journal.py tests/test_forex_demo_preflight.py tests/test_tickerall_demo_transport.py
