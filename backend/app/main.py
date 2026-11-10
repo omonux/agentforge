@@ -1,5 +1,6 @@
 import os, sqlite3, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal, validate_symbol
+from .omonux_forex import router as forex_router
 from .omonux_backtest import backtest_closed_candles
 from .omonux_challenge import challenge_report
 from .omonux_fast_radar import scan_fast_radar
@@ -118,6 +119,7 @@ async def life(app):
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
 app.include_router(omonux_research_router)
+app.include_router(forex_router)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:5173").split(",")],allow_methods=["*"],allow_headers=["*"],allow_credentials=True)
 class Task(BaseModel):
  agent:str
