@@ -85,3 +85,39 @@ def forex_research_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "execution": "research_only_no_order_placed",
         "notice": "This is a research hypothesis, not a calibrated probability or an order authorization.",
     }
+
+def forex_risk_warning(candles: list[dict[str, Any]], signal: dict[str, Any]) -> dict[str, Any]:
+    """Explain observed hazards, never pretend to predict profit or loss."""
+    if len(candles) < 40:
+        raise ValueError("At least 40 closed candles required")
+    closes = [float(c["close"]) for c in candles]
+    if any(not math.isfinite(p) or p <= 0 for p in closes):
+        raise ValueError("Invalid close prices")
+    recent = candles[-20:]
+    ranges = [float(c["high"]) - float(c["low"]) for c in recent]
+    if any(not math.isfinite(x) or x < 0 for x in ranges):
+        raise ValueError("Invalid candle ranges")
+    typical_range = sum(ranges[:-1]) / max(1, len(ranges) - 1)
+    latest_range = ranges[-1]
+    reasons = []
+    if typical_range > 0 and latest_range > typical_range * 2.5:
+        reasons.append("Latest candle range is unusually large versus recent candles")
+    changes = [abs(closes[i] / closes[i-1] - 1) for i in range(len(closes)-19, len(closes))]
+    recent_change = changes[-1]
+    baseline_change = sum(changes[:-1]) / max(1, len(changes)-1)
+    if baseline_change > 0 and recent_change > baseline_change * 3:
+        reasons.append("Latest close-to-close move is unusually large")
+    if signal.get("side") == "HOLD":
+        reasons.append("No directional signal")
+    # Confidence 0 is an uncalibrated placeholder, NOT a 0% win probability.
+    if signal.get("confidence") == 0:
+        reasons.append("Signal confidence is not calibrated; profitability and loss probability are unknown")
+    return {
+        "risk_level": "ELEVATED" if len(reasons) > 1 else "UNVERIFIED",
+        "reasons": reasons,
+        "loss_probability": None,
+        "win_probability": None,
+        "can_authorize_order": False,
+        "action": "NO_TRADE",
+        "notice": "These warnings describe observed data, not a prediction that a trade will win or lose.",
+    }
