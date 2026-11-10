@@ -149,9 +149,20 @@ async def forex_accounts():
 
 
 @router.get("/account")
-async def forex_account():
+async def forex_account(account_id: str | None = None):
     try:
-        payload = await _tickerall_get("/v1/accounts/" + _account_id())
+        # Allow verification of an ID discovered from the read-only accounts list.
+        # Never accept arbitrary paths or use this for broker order execution.
+        if account_id is not None:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", account_id):
+                raise ValueError("Invalid TickerAll account ID")
+            listed = await _tickerall_get("/v1/accounts")
+            if not isinstance(listed, list) or not any(isinstance(a, dict) and str(a.get("id")) == account_id for a in listed):
+                raise ValueError("Account ID not present in connected TickerAll accounts")
+            selected_id = account_id
+        else:
+            selected_id = _account_id()
+        payload = await _tickerall_get("/v1/accounts/" + selected_id)
         if not isinstance(payload, dict) or payload.get("isDemo") is not True:
             raise ValueError("Only verified MT5 demo accounts are supported")
         return {"status": payload.get("status"), "is_demo": True,
