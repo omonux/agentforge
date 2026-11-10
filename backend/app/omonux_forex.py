@@ -217,7 +217,7 @@ async def forex_candles(symbol: str, timeframe: str = "M30", hours: int = 72):
 @router.get("/research/{symbol}")
 async def forex_research(symbol: str, timeframe: str = "M30", hours: int = 168):
     """Read-only Forex analysis using verified demo candles and existing council."""
-    from .omonux_forex_intelligence import normalize_forex_candles, forex_research_signal
+    from .omonux_forex_intelligence import normalize_forex_candles, forex_research_signal, forex_risk_warning
     from .omonux_council import run_council
     from .main import current_ai_config
 
@@ -225,11 +225,12 @@ async def forex_research(symbol: str, timeframe: str = "M30", hours: int = 168):
     try:
         normalized = normalize_forex_candles(candles_response["candles"])
         signal = forex_research_signal(normalized)
+        risk_warning = forex_risk_warning(normalized, signal)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     if signal["side"] == "HOLD":
         return {"symbol": symbol.upper(), "timeframe": timeframe, "signal": signal,
-                "decision": "NO_TRADE", "reason": "Insufficient directional evidence",
+                "decision": "NO_TRADE", "risk_warning": risk_warning, "reason": "Insufficient directional evidence",
                 "execution": "research_only_no_order_placed"}
     base, key, model = current_ai_config()
     if not (base and key and model):
@@ -240,4 +241,4 @@ async def forex_research(symbol: str, timeframe: str = "M30", hours: int = 168):
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"symbol": symbol.upper(), "timeframe": timeframe, "signal": signal,
-            "council": council, "execution": "research_only_no_order_placed"}
+            "council": council, "risk_warning": risk_warning, "execution": "research_only_no_order_placed"}
