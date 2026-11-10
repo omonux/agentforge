@@ -9,6 +9,7 @@ export default function OmonuxForex(){
  const [verified,setVerified]=useState(false);
  const [candles,setCandles]=useState<any>(null);
  const [research,setResearch]=useState<any>(null);
+ const [preflight,setPreflight]=useState<any>(null);
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
  const [symbol,setSymbol]=useState("EURUSD");
@@ -36,6 +37,8 @@ export default function OmonuxForex(){
   <p className="muted">AgentForge Connect API · Read-only Forex integration. Your API key stays in Render, never in this browser or the GitHub repository.</p>
   <p><b>API key:</b> {status?.feed_configured?"Configured in Render":"Not configured"} · <b>MT5 account ID:</b> {status?.account_configured?"Configured":"Not configured"} · <b>Broker order execution:</b> Disabled</p>
   <div className="actions"><button className="secondary" disabled={busy||!status?.feed_configured} onClick={()=>get("/api/v1/trading/forex/accounts",d=>{const list=Array.isArray(d.accounts)?d.accounts:[];setAccounts(list);setSelectedAccountId(list.find((a:Account)=>a.is_demo)?.id||"");setVerified(false)})}>Check TickerAll connection</button><button className="secondary" disabled={busy||(!selectedAccountId&&!status?.account_configured)} onClick={()=>get("/api/v1/trading/forex/account"+(selectedAccountId?"?account_id="+encodeURIComponent(selectedAccountId):""),d=>{setVerified(true);setError("");setAccounts(prev=>prev.map(a=>a.id===selectedAccountId?{...a,broker:d.broker,server:d.server,is_demo:d.is_demo,status:d.status}:a))})}>Verify demo account</button></div>
+  <div className="actions"><button className="secondary" disabled={busy||!verified||!status?.account_configured} onClick={()=>{setPreflight(null);get("/api/v1/trading/forex/preflight/session",setPreflight)}}>Run MT5 session preflight (read only)</button></div>
+  {preflight&&<p role="status"><b>MT5 session ready:</b> {preflight.session_ready?"Yes":"No"} · <b>Demo verified:</b> {preflight.verified_demo?"Yes":"No"} · <b>Open positions:</b> {preflight.open_positions} · <b>Trading permission:</b> Not verified · <b>Stop loss:</b> Not verified · <b>Execution:</b> Disabled. {preflight.next_step}</p>}
   {accounts.map(a=><div className="taskrow" key={a.id}><span><b>{a.broker||"MT5"} · {a.server||"Broker"}</b><small>Account ID: {a.id} · {a.is_demo?"DEMO":"Not verified as demo"} · {a.status||"Unknown"} · {a.hot===false?"Session cold":"Session state not checked"}</small></span></div>)}
   {accounts.filter(a=>a.is_demo).length>1&&<label>Demo account <select value={selectedAccountId} onChange={e=>{setSelectedAccountId(e.target.value);setVerified(false)}}>{accounts.filter(a=>a.is_demo).map(a=><option key={a.id} value={a.id}>{a.server||"MT5"} · {a.id}</option>)}</select></label>}
   {verified&&<p role="status">Demo account verified successfully. Broker execution remains disabled.</p>}
