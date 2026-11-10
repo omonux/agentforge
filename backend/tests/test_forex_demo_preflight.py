@@ -70,3 +70,12 @@ def test_read_only_preflight_makes_only_get_requests(monkeypatch):
     assert result["execution_enabled"] is False
     assert len(seen) == 5
     assert all(path.startswith("/v1/accounts") for path in seen)
+
+def test_protected_order_preview_requires_nonzero_stop():
+    payload = p.build_protected_order_preview(symbol="EURUSD", side="BUY",
+                                              volume="0.01", stop_loss="1.09980")
+    assert payload["stopLoss"] == 1.09980
+    assert payload["type"] == "market"
+    with pytest.raises(p.PreflightRejected):
+        p.build_protected_order_preview(symbol="EURUSD", side="BUY",
+                                        volume="0.01", stop_loss=0)
