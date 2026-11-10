@@ -117,3 +117,18 @@ async def read_only_demo_preflight(account_id: str, symbol: str, side: str, stop
     return {**session, **stop, "symbol": symbol,
             "execution_enabled": False,
             "reason": "Read-only preflight cannot verify order permissions, quote freshness or actual broker stop installation"}
+
+def build_protected_order_preview(*, symbol: str, side: str, volume: Any,
+                                  stop_loss: Any, take_profit: Any | None = None) -> dict:
+    """Construct the documented broker request shape; never send it."""
+    if not isinstance(symbol, str) or not symbol.isascii() or not symbol.replace("_", "").isalnum():
+        raise PreflightRejected("Invalid symbol")
+    if side not in ("BUY", "SELL"):
+        raise PreflightRejected("Invalid direction")
+    lots = _positive(volume, "Volume")
+    stop = _positive(stop_loss, "Stop loss")
+    body = {"type": "market", "symbol": symbol, "side": side,
+            "volume": float(lots), "stopLoss": float(stop)}
+    if take_profit is not None:
+        body["takeProfit"] = float(_positive(take_profit, "Take profit"))
+    return body
