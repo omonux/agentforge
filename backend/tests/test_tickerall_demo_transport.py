@@ -31,3 +31,17 @@ def test_invalid_order_arguments_fail_before_broker_call(monkeypatch):
             asyncio.run(broker.submit_demo_market_order(
                 "cmwb1b0fi0kaio9012c9azw6n",
                 idempotency_key=str(uuid.uuid4()), **kwargs))
+
+def test_root_demo_flag_is_accepted(monkeypatch):
+    async def demo(*args, **kwargs):
+        return {"isDemo": True, "account": {"currency": "USD"}}
+    monkeypatch.setattr(broker, "_request", demo)
+    data = asyncio.run(broker.get_demo_account("cmwb1b0fi0kaio9012c9azw6n"))
+    assert data["isDemo"] is True
+
+def test_unverified_demo_flag_fails_closed(monkeypatch):
+    async def unknown(*args, **kwargs):
+        return {"account": {"currency": "USD"}}
+    monkeypatch.setattr(broker, "_request", unknown)
+    with pytest.raises(broker.BrokerUnavailable, match="demo"):
+        asyncio.run(broker.get_demo_account("cmwb1b0fi0kaio9012c9azw6n"))
