@@ -50,7 +50,7 @@ def test_daily_loss_limit():
 
 def test_projected_loss_cannot_cross_daily_limit():
     with pytest.raises(RiskRejected, match="daily 1%"):
-        evaluate_demo_order(replace(valid(), current_equity="9905"))
+        evaluate_demo_order(replace(valid(), current_equity="9900.5"))
 
 def test_sell_requires_stop_above_entry():
     with pytest.raises(RiskRejected, match="SELL stop"):
