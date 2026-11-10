@@ -202,6 +202,8 @@ async def run_council(
     """Run all twelve specialists; fail closed if any specialist fails."""
     if not (base_url and api_key and model):
         raise RuntimeError("AI provider is not configured; the twelve-agent council cannot run.")
+    if market_type not in {"crypto", "forex"}:
+        raise ValueError("Unsupported market type")
     if len(candles) < 40:
         raise ValueError("The council requires at least 40 completed candles.")
     evidence = _market_evidence(symbol, timeframe, candles, signal, multi_timeframe_candles, market_type)
