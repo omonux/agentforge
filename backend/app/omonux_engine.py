@@ -49,7 +49,7 @@ async def _load_binance_candles(key: tuple) -> list[dict[str, Any]]:
     symbol, interval, limit = key
     async with _BINANCE_SEMAPHORE:
         if time.monotonic() < _BINANCE_COOLDOWN_UNTIL:
-            raise RuntimeError("Binance candle rate-limit cooldown active; no fresh candle data available")
+            raise ValueError("Binance candle rate-limit cooldown active; no fresh candle data available")
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get(
                 f"{BINANCE}/api/v3/klines",
@@ -57,7 +57,7 @@ async def _load_binance_candles(key: tuple) -> list[dict[str, Any]]:
             )
             if response.status_code in (429, 418):
                 _BINANCE_COOLDOWN_UNTIL = time.monotonic() + _rate_limit_seconds(response)
-                raise RuntimeError("Binance candle rate limit reached; cooling down before new requests")
+                raise ValueError("Binance candle rate limit reached; cooling down before new requests")
             response.raise_for_status()
             raw = response.json()
         if not isinstance(raw, list) or len(raw) < 2:
@@ -89,7 +89,7 @@ async def fetch_candles(symbol: str, interval: str = "30m", limit: int = 120) ->
         # Fail closed during cooldown, including for cached data: the entry
         # engine must not treat pre-limit candles as fresh market evidence.
         if time.monotonic() < _BINANCE_COOLDOWN_UNTIL:
-            raise RuntimeError("Binance candle rate-limit cooldown active; new entries paused")
+            raise ValueError("Binance candle rate-limit cooldown active; new entries paused")
         cached = _CANDLE_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
             return cached[1]
