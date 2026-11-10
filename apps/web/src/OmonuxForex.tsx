@@ -11,10 +11,24 @@ export default function OmonuxForex(){
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
  const [symbol,setSymbol]=useState("EURUSD");
- useEffect(()=>{apiFetch(API+"/api/v1/trading/forex/status").then(async r=>{if(r.ok)setStatus(await r.json())}).catch(()=>setError("Forex service unavailable"))},[]);
+ async function requestJson(path:string):Promise<any>{
+  const response=await apiFetch(API+path,{headers:{"Accept":"application/json"}});
+  const contentType=response.headers.get("content-type")||"";
+  if(!contentType.toLowerCase().includes("application/json")){
+   const hint=response.status===401||response.status===403?" Sign in again and retry.":response.status>=500?" The deployed backend or reverse proxy may be unavailable.":" Verify the deployed API route and reverse-proxy configuration.";
+   throw Error("Forex API returned a non-JSON response (HTTP "+response.status+", "+(contentType||"unknown content type")+")."+hint);
+  }
+  let data:any;
+  try{data=await response.json()}catch{throw Error("Forex API returned invalid JSON (HTTP "+response.status+").")}
+  if(!response.ok)throw Error(typeof data?.detail==="string"?data.detail:"Forex API request failed (HTTP "+response.status+").");
+  return data;
+ }
+ useEffect(()=>{requestJson("/api/v1/trading/forex/status").then(setStatus).catch(e=>setError(e instanceof Error?e.message:"Forex service unavailable"))},[]);
  async function get(path:string,apply:(value:any)=>void){
-  setBusy(true);setError("");try{const r=await apiFetch(API+path);const data=await r.json();if(!r.ok)throw Error(typeof data.detail==="string"?data.detail:"TickerAll request failed");apply(data)}
-  catch(e){setError(e instanceof Error?e.message:"Connection failed")}finally{setBusy(false)}
+  setBusy(true);setError("");
+  try{apply(await requestJson(path))}
+  catch(e){setError(e instanceof Error?e.message:"Connection failed")}
+  finally{setBusy(false)}
  }
  return <section className="omx-auto-section" style={{marginTop:24}}>
   <h2>Forex Intelligence · TickerAll + MT5</h2>
