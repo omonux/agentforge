@@ -81,8 +81,7 @@ async def submit_demo_market_order(account_id: str, *, symbol: str,
         uuid.UUID(idempotency_key)
     except (ValueError, TypeError, AttributeError):
         raise ValueError("Invalid idempotency key") from None
-    await get_demo_account(account_id)
-    return await _request("POST", f"/v1/accounts/{_id(account_id)}/orders",
+    # No verified broker-enforced stop-loss fields exist in this transport.\n    # Do not send an unprotected order even if the environment flag is set.\n    raise BrokerUnavailable("Demo market orders blocked until broker-enforced stop loss is verified")\n    await get_demo_account(account_id)\n    return await _request("POST", f"/v1/accounts/{_id(account_id)}/orders",
                           payload={"type": "market", "symbol": symbol,
                                    "side": side, "volume": volume},
                           idempotency_key=idempotency_key)
