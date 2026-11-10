@@ -201,3 +201,32 @@ async def forex_candles(symbol: str, timeframe: str = "M30", hours: int = 72):
         raise HTTPException(422, str(exc))
     except httpx.HTTPError as exc:
         raise HTTPException(503, "TickerAll candles unavailable; research blocked") from exc
+
+
+@router.get("/research/{symbol}")
+async def forex_research(symbol: str, timeframe: str = "M30", hours: int = 168):
+    """Read-only Forex analysis using verified demo candles and existing council."""
+    from .omonux_forex_intelligence import normalize_forex_candles, forex_research_signal
+    from .omonux_council import run_council
+    from .main import current_ai_config
+
+    candles_response = await forex_candles(symbol, timeframe, hours)
+    try:
+        normalized = normalize_forex_candles(candles_response["candles"])
+        signal = forex_research_signal(normalized)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if signal["side"] == "HOLD":
+        return {"symbol": symbol.upper(), "timeframe": timeframe, "signal": signal,
+                "decision": "NO_TRADE", "reason": "Insufficient directional evidence",
+                "execution": "research_only_no_order_placed"}
+    base, key, model = current_ai_config()
+    if not (base and key and model):
+        raise HTTPException(503, "AI provider not configured; no council decision")
+    try:
+        council = await run_council(symbol.upper(), timeframe, normalized, signal,
+                                    base, key, model, market_type="forex")
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"symbol": symbol.upper(), "timeframe": timeframe, "signal": signal,
+            "council": council, "execution": "research_only_no_order_placed"}
