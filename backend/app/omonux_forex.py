@@ -276,6 +276,64 @@ async def forex_open_positions():
         raise HTTPException(503, "MT5 positions unavailable; cannot establish flat account") from exc
 
 
+class DemoStopUpdate(BaseModel):
+    ticket: str = Field(pattern=r"^[0-9]{1,20}$")
+    stop_loss: float = Field(gt=0, allow_inf_nan=False)
+    confirmation: bool = False
+
+
+@router.post("/positions/protect")
+async def protect_existing_demo_position(request: DemoStopUpdate):
+    """Explicit one-ticket MT5 demo SL change, with broker read-back confirmation."""
+    import uuid
+    from .tickerall_demo_transport import _request, BrokerUnavailable
+    if os.getenv("TICKERALL_DEMO_STOP_UPDATES_ENABLED") != "true":
+        raise HTTPException(403, "Demo stop updates are disabled. Set TICKERALL_DEMO_STOP_UPDATES_ENABLED=true only after reviewing the risk.")
+    if request.confirmation is not True:
+        raise HTTPException(422, "Explicit confirmation required")
+    try:
+        account_id = _account_id()
+        roster = await _tickerall_get("/v1/accounts")
+        account = await _tickerall_get("/v1/accounts/" + account_id)
+        if not isinstance(roster, list) or not any(isinstance(a,dict) and a.get("id")==account_id and a.get("isDemo") is True and str(a.get("broker","")).lower()=="mt5" for a in roster):
+            raise ValueError("Account not verified MT5 demo in roster")
+        if not isinstance(account,dict) or account.get("isDemo") is not True or str(account.get("broker","")).lower()!="mt5":
+            raise ValueError("Account not verified MT5 demo")
+        raw = await _tickerall_get("/v1/accounts/" + account_id + "/positions")
+        positions = _normalize_demo_positions(raw)
+        position = next((p for p in positions if p["ticket"]==request.ticket),None)
+        if position is None:
+            raise ValueError("Position ticket no longer open; refresh positions")
+        if position["stop_loss_status"]=="set":
+            raise ValueError("Position already has a stop; refresh before modifying")
+        side = position["side"].upper()
+        symbol = position["symbol"]
+        if side not in ("BUY","SELL") or not symbol or not re.fullmatch(r"[A-Za-z0-9_.-]{3,40}",symbol):
+            raise ValueError("Broker position direction or symbol invalid")
+        quote = await _tickerall_get("/v1/accounts/" + account_id + "/symbols/" + symbol + "/quote")
+        spec_response = await _tickerall_get("/v1/accounts/" + account_id + "/symbols/" + symbol + "/spec")
+        from .forex_demo_preflight import validate_protective_stop
+        spec = spec_response.get("spec") if isinstance(spec_response,dict) else None
+        validation = validate_protective_stop(spec,quote,side=side,stop_loss=request.stop_loss)
+        # The user supplies the price; never infer a stop from a fictional quote.
+        key = str(uuid.uuid4())
+        await _request("PATCH", "/v1/accounts/" + account_id + "/positions/" + request.ticket,
+                       payload={"stopLoss":request.stop_loss},idempotency_key=key)
+        confirmed_raw = await _tickerall_get("/v1/accounts/" + account_id + "/positions")
+        confirmed = next((p for p in _normalize_demo_positions(confirmed_raw) if p["ticket"]==request.ticket),None)
+        if not confirmed or confirmed["stop_loss_status"]!="set" or abs(confirmed["stop_loss"]-request.stop_loss)>1e-7:
+            raise HTTPException(409,"Broker update submitted but stop not confirmed by read-back. Check MT5 before retrying; do not blindly resend.")
+        return {"ticket":request.ticket,"stop_loss":confirmed["stop_loss"],"confirmed":True,
+                "source":"TickerAll broker position read-back","execution":"demo_stop_modified",
+                "broker_stop_level_points":validation["broker_stop_level_points"]}
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
+    except BrokerUnavailable as exc:
+        raise HTTPException(503,"Broker modification unavailable or uncertain. Inspect MT5 before retrying.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(503,"Broker request failed or timed out. Inspect MT5 before retrying.") from exc
+
+
 @router.get("/preflight/session")
 async def forex_session_preflight():
     """Read-only broker session verification. Never authorizes execution."""
