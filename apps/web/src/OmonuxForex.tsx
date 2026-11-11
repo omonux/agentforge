@@ -31,6 +31,24 @@ export default function OmonuxForex(){
  const riskUsd=100*risk/100;
  const pipSize=symbol==="USDJPY"?0.01:0.0001;
  const pipValue=validPlan?Math.abs(entry-stop)/pipSize:0;
+ function loadPaperExample(){
+  const base=symbol==="USDJPY"?150: symbol==="GBPUSD"?1.3:1.115;
+  const pip=symbol==="USDJPY"?0.01:0.0001;
+  const entryPrice=base, stopPrice=paperSide==="BUY"?base-20*pip:base+20*pip;
+  const targetPrice=paperSide==="BUY"?base+40*pip:base-40*pip;
+  const digits=symbol==="USDJPY"?3:5;
+  setPaperEntry(entryPrice.toFixed(digits));setPaperStop(stopPrice.toFixed(digits));setPaperTarget(targetPrice.toFixed(digits));
+  setPaperQuote(targetPrice.toFixed(digits));setPaperRisk("0.5");setPaperConfirm(false);
+  setPaperMessage("Example loaded. These are fictional test prices, not current MT5 quotes. Tick the confirmation box, record the simulated entry, then click Evaluate simulated exits.");
+ }
+ function testExampleExit(kind:"STOP"|"TARGET"){
+  const open=paperTrades.find(t=>t.status==="OPEN"&&t.symbol===symbol);
+  if(!open){setPaperMessage("First record a simulated entry. Click Load example, tick the confirmation box, then Record simulated entry.");return}
+  const exit=kind==="STOP"?open.stop:open.target;
+  setPaperQuote(String(exit));
+  setPaperTrades(prev=>prev.map(t=>t.id===open.id?{...t,status:kind==="STOP"?"STOP TRIGGERED":"TARGET TRIGGERED",exit,pnl:kind==="STOP"?-t.risk:t.risk*Math.abs(t.target-t.entry)/Math.abs(t.entry-t.stop)}:t));
+  setPaperMessage(kind==="STOP"?"Test passed: simulated stop loss triggered. No broker order was sent.":"Test passed: simulated take profit triggered. No broker order was sent.");
+ }
  function createPaperTrade(){
   if(!validPlan||riskReward<1.5||!paperConfirm){setPaperMessage("A valid stop, target, minimum 1.5 reward/risk, and explicit confirmation are required.");return}
   setPaperTrades(prev=>[{id:Date.now(),symbol,side:paperSide,entry,stop,target,risk:riskUsd,status:"OPEN"},...prev]);
@@ -114,6 +132,7 @@ export default function OmonuxForex(){
   </>}
   {tab==="paper"&&<div style={{display:"grid",gap:16}}>
    <div className="taskrow"><span><b>Paper execution · $100 virtual test balance</b><small>Local simulation only. Nothing is transmitted to MT5. Trade records disappear on page reload. Prices are manually supplied; this is not an automated broker stop.</small></span></div>
+   <div className="taskrow"><span><b>Quick start · no calculations required</b><small>Step 1: Choose a pair and direction. Step 2: Load example prices. Step 3: Confirm and record the simulated trade. Step 4: Test a stop or target exit. Example prices are fictional.</small><button className="secondary" onClick={loadPaperExample}>Load example trade automatically</button></span></div>
    <div className="omx-auto-grid">
     <label>Forex pair<select value={symbol} onChange={e=>{setSymbol(e.target.value);setPaperConfirm(false)}}><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option><option value="USDJPY">USD/JPY</option></select></label>
     <label>Direction<select value={paperSide} onChange={e=>{setPaperSide(e.target.value as "BUY"|"SELL");setPaperConfirm(false)}}><option value="BUY">BUY · Long</option><option value="SELL">SELL · Short</option></select></label>
@@ -127,7 +146,8 @@ export default function OmonuxForex(){
    <div className="actions"><button disabled={!validPlan||riskReward<1.5||!paperConfirm} onClick={createPaperTrade}>Record simulated {paperSide} entry</button></div>
    <div className="taskrow"><span><b>Test stop-loss / take-profit exit</b><small>Enter an independently observed price. Stops and targets trigger only when you click Evaluate; there is no continuous broker monitoring.</small>
     <label>Observed price<input type="number" step="any" min="0" value={paperQuote} onChange={e=>setPaperQuote(e.target.value)} placeholder="Latest observed price"/></label>
-    <button className="secondary" onClick={evaluatePaper}>Evaluate simulated exits</button></span></div>
+    <button className="secondary" onClick={evaluatePaper}>Evaluate simulated exits</button>
+    <div className="actions"><button className="secondary" onClick={()=>testExampleExit("STOP")}>Test stop loss</button><button className="secondary" onClick={()=>testExampleExit("TARGET")}>Test take profit</button></div></span></div>
    {paperMessage&&<p role="status">{paperMessage}</p>}
    <div className="taskrow"><span><b>Simulated trade journal · {paperTrades.length} entries</b>{paperTrades.length===0?<small>No simulated trades recorded yet.</small>:<div style={{overflowX:"auto"}}><table><thead><tr><th>Pair</th><th>Side</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Simulated P/L</th></tr></thead><tbody>{paperTrades.map(t=><tr key={t.id}><td>{t.symbol}</td><td>{t.side}</td><td>{t.entry}</td><td>{t.stop}</td><td>{t.target}</td><td>{t.status}</td><td>{t.pnl===undefined?"—":"$"+t.pnl.toFixed(2)}</td></tr>)}</tbody></table></div>}</span></div>
   </div>}
