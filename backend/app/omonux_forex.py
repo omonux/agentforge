@@ -177,6 +177,65 @@ async def forex_account(account_id: str | None = None):
         raise HTTPException(503, "TickerAll account unavailable") from exc
 
 
+def _safe_position_number(value):
+    """Expose only finite numeric broker fields, never raw broker metadata."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _normalize_demo_positions(payload):
+    """Fail closed on malformed broker responses; do not silently report flat."""
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("positions"), list):
+        rows = payload["positions"]
+    else:
+        raise ValueError("TickerAll positions response has an unexpected shape")
+    if len(rows) > 1000 or any(not isinstance(p, dict) for p in rows):
+        raise ValueError("TickerAll positions response invalid")
+    positions = []
+    for p in rows:
+        positions.append({
+            "ticket": str(p["ticket"])[:80] if p.get("ticket") is not None else None,
+            "symbol": str(p["symbol"])[:80] if p.get("symbol") is not None else None,
+            "side": str(p.get("side") or p.get("type") or "UNKNOWN")[:32],
+            "volume": _safe_position_number(p.get("volume")),
+            "open_price": _safe_position_number(p.get("openPrice")),
+            "stop_loss": _safe_position_number(p.get("stopLoss")),
+            "take_profit": _safe_position_number(p.get("takeProfit")),
+            "profit": _safe_position_number(p.get("profit")),
+            "magic": p.get("magic") if type(p.get("magic")) is int else None,
+        })
+    return positions
+
+
+@router.get("/positions")
+async def forex_open_positions():
+    """Read-only positions for the configured account, verified as demo in both views."""
+    try:
+        account_id = _account_id()
+        roster = await _tickerall_get("/v1/accounts")
+        if not isinstance(roster, list) or not any(
+            isinstance(row, dict) and row.get("id") == account_id
+            and row.get("isDemo") is True and str(row.get("broker", "")).lower() == "mt5"
+            for row in roster
+        ):
+            raise ValueError("Configured account is not a verified MT5 demo account in roster")
+        account = await _tickerall_get("/v1/accounts/" + account_id)
+        if not isinstance(account, dict) or account.get("isDemo") is not True or str(account.get("broker", "")).lower() != "mt5":
+            raise ValueError("Configured account is not a verified MT5 demo account")
+        raw = await _tickerall_get("/v1/accounts/" + account_id + "/positions")
+        positions = _normalize_demo_positions(raw)
+        return {"positions": positions, "count": len(positions),
+                "account_id": account_id, "execution_enabled": False,
+                "source": "TickerAll MT5 demo read-only positions"}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (httpx.HTTPError, TypeError, AttributeError) as exc:
+        raise HTTPException(503, "MT5 positions unavailable; cannot establish flat account") from exc
+
+
 @router.get("/preflight/session")
 async def forex_session_preflight():
     """Read-only broker session verification. Never authorizes execution."""
