@@ -526,9 +526,9 @@ async def demo_auto_trading_readiness():
     checks = [
         {"id":"demo_account","label":"MT5 demo account verified","passed":False,"detail":"Requires broker roster and account checks"},
         {"id":"broker_session","label":"Broker session online","passed":False,"detail":"Requires a hot connected MT5 demo session"},
-        {"id":"protected_entry","label":"Broker-enforced stop loss on entry","passed":False,"detail":"Protected order POST contract not verified"},
-        {"id":"take_profit","label":"Broker take-profit placement","passed":False,"detail":"Broker TP acknowledgement and read-back not verified"},
-        {"id":"close_position","label":"Close position API and read-back","passed":False,"detail":"Closing route and idempotent reconciliation not verified"},
+        {"id":"protected_entry","label":"Broker-enforced stop loss on entry","passed":False,"detail":"Protected-order transport implemented; broker acceptance and SL read-back not yet demonstrated"},
+        {"id":"take_profit","label":"Broker take-profit placement","passed":False,"detail":"TP validation and read-back implemented; no successful broker execution test recorded"},
+        {"id":"close_position","label":"Close position API and read-back","passed":False,"detail":"Close transport implemented with idempotency key and broker read-back; real demo close not yet verified"},
         {"id":"risk_controls","label":"Durable risk limits and kill switch","passed":False,"detail":"Forex-specific persisted limits and monitoring not yet verified"},
         {"id":"news_signals","label":"Fresh economic-event and market feeds","passed":False,"detail":"Annual World Bank indicators are historical, not trading triggers"},
     ]
@@ -548,7 +548,7 @@ async def demo_auto_trading_readiness():
             checks[1]["detail"] = "Connected demo session" if hot else "Session offline or unverified"
     except (ValueError,httpx.HTTPError,TypeError,AttributeError):
         pass
-    return {"mode":"MT5_DEMO_ONLY","automatic_entry_enabled":False,"automatic_exit_enabled":False,
+    # An implemented transport is not proof of broker acceptance or durable risk enforcement.\n    return {"mode":"MT5_DEMO_ONLY","automatic_entry_enabled":False,"automatic_exit_enabled":False,
             "orders_submitted":0,"ready":False,"checks":checks,
             "next_step":"Verify protected-entry and close-position broker contracts, reconciliation and durable risk limits before enabling unattended demo orders.",
             "notice":"Never infer profitability or broker execution from AI research or simulated orders."}
