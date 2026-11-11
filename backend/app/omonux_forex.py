@@ -532,6 +532,7 @@ async def demo_auto_trading_readiness():
         {"id":"risk_controls","label":"Durable risk limits and kill switch","passed":False,"detail":"Forex-specific persisted limits and monitoring not yet verified"},
         {"id":"news_signals","label":"Fresh economic-event and market feeds","passed":False,"detail":"Annual World Bank indicators are historical, not trading triggers"},
     ]
+    account_id = None
     try:
         account_id = _account_id()
         roster = await _tickerall_get("/v1/accounts")
@@ -586,7 +587,7 @@ async def demo_auto_trading_readiness():
     try:
         import psycopg
         dsn = os.getenv("DATABASE_URL", "").strip()
-        if dsn.startswith(("postgresql://", "postgres://")):
+        if account_id and dsn.startswith(("postgresql://", "postgres://")):
             with psycopg.connect(dsn, connect_timeout=3) as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -604,7 +605,8 @@ async def demo_auto_trading_readiness():
                             checks[5]["detail"] = "Persisted Neon limits found; broker-side enforcement and monitoring still require verification"
                         else:
                             checks[5]["detail"] = "Neon risk table exists; account-specific limits or emergency stop not verified"
-    except (ImportError, Exception):
+    except Exception:
+        # Risk evidence is unavailable: retain the failed readiness check.
         pass
     # An implemented transport is not proof of broker acceptance or durable risk enforcement.
     return {"mode":"MT5_DEMO_ONLY","automatic_entry_enabled":False,"automatic_exit_enabled":False,
