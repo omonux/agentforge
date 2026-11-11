@@ -7,6 +7,9 @@ export default function OmonuxForex(){
  const [accounts,setAccounts]=useState<Account[]>([]);
  const [accountSummary,setAccountSummary]=useState<any>(null);
  const [accountCheckedAt,setAccountCheckedAt]=useState("");
+ const [accountHistory,setAccountHistory]=useState<Array<{time:string;equity:number;balance:number}>>([]);
+ const [autoRefresh,setAutoRefresh]=useState(true);
+ const [accountPollError,setAccountPollError]=useState("");
  const [selectedAccountId,setSelectedAccountId]=useState("");
  const [verified,setVerified]=useState(false);
  const [candles,setCandles]=useState<any>(null);
@@ -100,12 +103,25 @@ export default function OmonuxForex(){
   if(!response.ok)throw Error(typeof data?.detail==="string"?data.detail:"Forex API request failed (HTTP "+response.status+").");
   return data;
  }
- async function refreshAccountSummary(){
-  setBusy(true);setError("");
-  try{const data=await requestJson("/api/v1/trading/forex/account");setAccountSummary(data);setAccountCheckedAt(new Date().toLocaleTimeString())}
-  catch(e){setError(e instanceof Error?e.message:"Unable to load MT5 account figures")}
-  finally{setBusy(false)}
+ async function refreshAccountSummary(manual=false){
+  if(manual)setBusy(true);
+  try{
+   const data=await requestJson("/api/v1/trading/forex/account");
+   const a=data?.account;
+   if(a&&a.balance!=null&&a.equity!=null&&Number.isFinite(Number(a.balance))&&Number.isFinite(Number(a.equity))){
+    const point={time:new Date().toLocaleTimeString(),balance:Number(a.balance),equity:Number(a.equity)};
+    setAccountSummary(data);setAccountCheckedAt(point.time);setAccountPollError("");
+    setAccountHistory(prev=>[...prev.slice(-119),point]);
+   }else throw Error("Broker returned incomplete balance or equity");
+  }catch(e){setAccountPollError(e instanceof Error?e.message:"Unable to refresh broker figures")}
+  finally{if(manual)setBusy(false)}
  }
+ useEffect(()=>{
+  if(!status?.account_configured||!autoRefresh)return;
+  void refreshAccountSummary();
+  const id=window.setInterval(()=>{if(!document.hidden)void refreshAccountSummary()},30000);
+  return ()=>window.clearInterval(id);
+ },[status?.account_configured,autoRefresh]);
  async function refreshStatus(){
   setStatusLoading(true);
   try{
@@ -135,7 +151,17 @@ export default function OmonuxForex(){
    </div>
   </div>
   <div style={{padding:24,borderRadius:22,background:"linear-gradient(115deg,#113c3c,#162850 55%,#37235e)",border:"1px solid #467e91",color:"white"}}>
-   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}><div><div style={{letterSpacing:2,fontSize:12,color:"#9de9ff",fontWeight:800}}>MT5 DEMO · ACCOUNT PERFORMANCE</div><h3 style={{color:"white",fontSize:26,margin:"8px 0"}}>Is your $100,000 growing?</h3><p style={{color:"#c7d9f1",margin:0}}>Balance is closed-trade money. Equity includes open positions. Floating P/L changes as prices move.</p></div><button disabled={busy||!status?.account_configured} onClick={()=>void refreshAccountSummary()}>↻ Refresh broker figures</button></div>
+   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}><div><div style={{letterSpacing:2,fontSize:12,color:"#9de9ff",fontWeight:800}}>MT5 DEMO · ACCOUNT PERFORMANCE</div><h3 style={{color:"white",fontSize:26,margin:"8px 0"}}>Is your $100,000 growing?</h3><p style={{color:"#c7d9f1",margin:0}}>Balance is closed-trade money. Equity includes open positions. Floating P/L changes as prices move.</p></div><button disabled={busy||!status?.account_configured} onClick={()=>void refreshAccountSummary(true)}>↻ Refresh broker figures</button></div>
+   <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:14,marginTop:16,color:"#cfe5ff"}}>
+    <label style={{display:"flex",gap:8,alignItems:"center",cursor:"pointer"}}><input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)}/> Auto-refresh every 30 seconds</label>
+    <span style={{fontSize:12}}>Last successful update: {accountCheckedAt||"Waiting for first broker snapshot"}</span>
+    {accountPollError&&<span role="alert" style={{color:"#ffb4b4",fontSize:12}}>Refresh issue: {accountPollError} · Showing last successful values</span>}
+   </div>
+   {accountHistory.length>0&&<div style={{marginTop:22,padding:18,borderRadius:18,background:"#0d1d36",border:"1px solid #3c5c80"}}>
+    <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:12}}><b style={{color:"white"}}>Equity movement · live session</b><span style={{fontSize:12,color:"#b7d6f5"}}>{accountHistory.length} broker snapshots · last 120 · resets on reload</span></div>
+    {(()=>{const values=accountHistory.map(p=>p.equity);const min=Math.min(...values,100000),max=Math.max(...values,100000);const range=Math.max(max-min,1);const x=(i:number)=>18+(i/Math.max(1,values.length-1))*764;const y=(v:number)=>170-((v-min)/range)*145;const points=values.map((v,i)=>x(i)+","+y(v)).join(" ");return <svg viewBox="0 0 800 195" role="img" aria-label="MT5 demo equity over the current browser session" style={{width:"100%",height:"auto",maxHeight:260}}><line x1="18" y1={y(100000)} x2="782" y2={y(100000)} stroke="#e2b36c" strokeDasharray="7 5" opacity=".85"/><text x="22" y={Math.max(13,y(100000)-5)} fill="#ffd99c" fontSize="12">$100k reference</text><polyline fill="none" stroke={values[values.length-1]>=values[0]?"#34d399":"#fb7185"} strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" points={points}/>{values.map((v,i)=><circle key={i} cx={x(i)} cy={y(v)} r={i===values.length-1?5:2} fill="#9de9ff"/>)}<text x="18" y="190" fill="#b6cce7" fontSize="12">{min.toLocaleString("en-US",{maximumFractionDigits:2})} USD min</text><text x="780" y="190" textAnchor="end" fill="#b6cce7" fontSize="12">{max.toLocaleString("en-US",{maximumFractionDigits:2})} USD max</text></svg>})()}
+    <p style={{fontSize:12,color:"#b8cce5",margin:"8px 0 0"}}>This is an on-screen history of broker snapshots while this page stays open. It is not a permanent trading-performance record or a guaranteed continuous market feed.</p>
+   </div>}
    {accountSummary?.account?(()=>{
     const a=accountSummary.account;
     const balance=Number(a.balance),equity=Number(a.equity);
