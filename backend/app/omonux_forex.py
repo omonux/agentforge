@@ -462,3 +462,56 @@ async def macro_intelligence():
             "trade_execution_enabled":False,
             "warning":"Historical annual macroeconomic observations. Do not interpret as breaking news, forecasts, current policy rates, or instructions to trade.",
             "observations":results}
+
+
+@router.get("/exit-monitor")
+async def forex_exit_monitor(profit_target_usd: float = 100, trailing_retrace_usd: float = 30):
+    """Read-only demo exit assessment; NEVER claims broker closure or enforces stops.
+
+    Peak floating profit is process-local and resets on restart. The broker remains
+    authoritative for actual stop loss, take profit, and closed position status.
+    """
+    from datetime import datetime, timezone
+    if not (1 <= profit_target_usd <= 100000 and 1 <= trailing_retrace_usd <= 100000):
+        raise HTTPException(422, "Profit target and retracement must be between 1 and 100000 USD")
+    snapshot = await forex_open_positions()
+    if not hasattr(forex_exit_monitor, "_peaks"):
+        forex_exit_monitor._peaks = {}
+    peaks = forex_exit_monitor._peaks
+    account_id = snapshot["account_id"]
+    seen = set()
+    results = []
+    for p in snapshot["positions"]:
+        ticket = p["ticket"]
+        if not ticket:
+            continue
+        key = (account_id, ticket)
+        seen.add(key)
+        profit = p["profit"]
+        if profit is None:
+            results.append({"ticket":ticket,"symbol":p["symbol"],"status":"UNKNOWN_PNL","suggested_action":"VERIFY_IN_MT5","profit_usd":None,"peak_profit_usd":None,"drawdown_from_peak_usd":None,"stop_loss_status":p["stop_loss_status"],"take_profit_status":p["take_profit_status"]})
+            continue
+        peak = max(float(profit),peaks.get(key,float(profit)))
+        peaks[key] = peak
+        retrace = peak - float(profit)
+        if profit >= profit_target_usd:
+            action = "REVIEW_TAKE_PROFIT"
+        elif peak >= profit_target_usd and retrace >= trailing_retrace_usd:
+            action = "REVIEW_PROFIT_RETRACEMENT"
+        elif profit < 0:
+            action = "REVIEW_LOSS_AND_BROKER_STOP"
+        else:
+            action = "MONITOR"
+        results.append({"ticket":ticket,"symbol":p["symbol"],"status":action,"suggested_action":action,
+                        "profit_usd":profit,"peak_profit_usd":round(peak,2),
+                        "drawdown_from_peak_usd":round(retrace,2),
+                        "stop_loss_status":p["stop_loss_status"],"take_profit_status":p["take_profit_status"]})
+    for key in list(peaks):
+        if key[0] == account_id and key not in seen:
+            del peaks[key]
+    return {"mode":"read_only_advisory","broker_close_executed":False,
+            "automatic_close_enabled":False,"profit_target_usd":profit_target_usd,
+            "trailing_retrace_usd":trailing_retrace_usd,
+            "retrieved_at":datetime.now(timezone.utc).isoformat(),
+            "warning":"Advisory only. Does not place or close trades. Profit peaks reset on server restart; floating P/L may be stale. Broker-native SL/TP is required for actual protection.",
+            "positions":results}
