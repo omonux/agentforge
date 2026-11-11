@@ -99,8 +99,19 @@ async def close_demo_position_verified(account_id: str, *, ticket: str, idempote
     except (ValueError, TypeError, AttributeError):
         raise ValueError("Invalid idempotency key") from None
     account = await get_demo_account(account_id)
-    if str(account.get("broker","")).lower() != "mt5" or str(account.get("status","")).lower() != "online":
-        raise BrokerUnavailable("MT5 demo session is not verified online")
+    roster = await _request("GET", "/v1/accounts")
+    # The account endpoint can contain nested financial data. Verify the
+    # demo/broker/session identity against BOTH top-level account and roster.
+    if not isinstance(roster, list):
+        raise BrokerUnavailable("Broker account roster unavailable")
+    row = next((x for x in roster if isinstance(x, dict) and x.get("id") == account_id), None)
+    if (not row or row.get("isDemo") is not True
+            or str(row.get("broker", "")).lower() != "mt5"
+            or str(account.get("broker", "")).lower() != "mt5"
+            or str(row.get("status", "")).lower() not in ("online", "connected")
+            or row.get("hot") is not True
+            or str(account.get("status", "")).lower() != "online"):
+        raise BrokerUnavailable("MT5 demo identity or hot session unverified")
     before = await _request("GET", f"/v1/accounts/{account_id}/positions")
     rows = before.get("positions")
     if not isinstance(rows,list):
