@@ -124,14 +124,25 @@ async def submit_demo_market_order(account_id: str, *, symbol: str,
     if len(matching) != 1:
         raise BrokerUnavailable("Order response received but position unconfirmed; reconcile broker")
     p = matching[0]
-    if (p.get("symbol") != symbol or p.get("side") != side or
-            not isinstance(p.get("stopLoss"), (int, float)) or
-            not isinstance(p.get("takeProfit"), (int, float)) or
-            abs(p["stopLoss"] - stop_loss) > 1e-7 or
-            abs(p["takeProfit"] - take_profit) > 1e-7):
+    from decimal import Decimal, InvalidOperation
+    def same_price(actual: Any, expected: float) -> bool:
+        if actual is None or isinstance(actual, bool):
+            return False
+        try:
+            observed = Decimal(str(actual))
+            target = Decimal(str(expected))
+        except (InvalidOperation, ValueError):
+            return False
+        return observed.is_finite() and abs(observed - target) <= Decimal("0.0000001")
+    broker_side = p.get("side", p.get("type", p.get("direction")))
+    if broker_side in (0, 1):
+        broker_side = {0: "BUY", 1: "SELL"}[broker_side]
+    if (p.get("symbol") != symbol or str(broker_side).upper() != side or
+            not same_price(p.get("stopLoss", p.get("sl")), stop_loss) or
+            not same_price(p.get("takeProfit", p.get("tp")), take_profit)):
         raise BrokerUnavailable("Position exists but protective levels not confirmed; inspect MT5 immediately")
     return {"ticket": ticket, "confirmed_open": True, "mode": "demo",
-            "stop_loss": p["stopLoss"], "take_profit": p["takeProfit"]}
+            "stop_loss": stop_loss, "take_profit": take_profit}
 
 
 async def close_demo_position_verified(account_id: str, *, ticket: str, idempotency_key: str) -> dict[str, Any]:
