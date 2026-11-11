@@ -548,7 +548,8 @@ async def demo_auto_trading_readiness():
             checks[1]["detail"] = "Connected demo session" if hot else "Session offline or unverified"
     except (ValueError,httpx.HTTPError,TypeError,AttributeError):
         pass
-    # An implemented transport is not proof of broker acceptance or durable risk enforcement.\n    return {"mode":"MT5_DEMO_ONLY","automatic_entry_enabled":False,"automatic_exit_enabled":False,
+    # An implemented transport is not proof of broker acceptance or durable risk enforcement.
+    return {"mode":"MT5_DEMO_ONLY","automatic_entry_enabled":False,"automatic_exit_enabled":False,
             "orders_submitted":0,"ready":False,"checks":checks,
             "next_step":"Verify protected-entry and close-position broker contracts, reconciliation and durable risk limits before enabling unattended demo orders.",
             "notice":"Never infer profitability or broker execution from AI research or simulated orders."}
