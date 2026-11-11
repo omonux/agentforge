@@ -422,3 +422,43 @@ async def forex_research(symbol: str, timeframe: str = "M30", hours: int = 168):
         raise HTTPException(422, str(exc)) from exc
     return {"symbol": symbol.upper(), "timeframe": timeframe, "signal": signal,
             "council": council, "risk_warning": risk_warning, "execution": "research_only_no_order_placed"}
+
+
+# Public macroeconomic intelligence: World Bank annual indicators. Read-only.
+# This is historical context, NOT a live economic calendar or trade signal.
+MACRO_COUNTRIES = {"US": "USA", "GB": "GBR", "EU": "EMU", "JP": "JPN", "CH": "CHE"}
+MACRO_INDICATORS = {
+    "inflation_consumer_pct": "FP.CPI.TOTL.ZG",
+    "gdp_growth_pct": "NY.GDP.MKTP.KD.ZG",
+    "unemployment_pct": "SL.UEM.TOTL.ZS",
+}
+
+@router.get("/macro-intelligence")
+async def macro_intelligence():
+    """Public World Bank macro series; partial failures are shown, never concealed."""
+    from datetime import datetime, timezone
+    import asyncio
+    async def read_one(country: str, name: str, indicator: str):
+        url = f"https://api.worldbank.org/v2/country/{country}/indicator/{indicator}"
+        try:
+            async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
+                response = await client.get(url, params={"format":"json","per_page":15})
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload,list) or len(payload)<2 or not isinstance(payload[1],list):
+                raise ValueError("Unexpected World Bank response")
+            observations = [x for x in payload[1] if isinstance(x,dict) and isinstance(x.get("value"),(int,float)) and not isinstance(x.get("value"),bool)]
+            if not observations:
+                raise ValueError("No published observations")
+            latest = max(observations,key=lambda x:int(x["date"]))
+            return {"country":country,"indicator":name,"value":round(float(latest["value"]),3),"year":latest["date"],"status":"available"}
+        except (httpx.HTTPError,ValueError,TypeError,KeyError):
+            return {"country":country,"indicator":name,"status":"unavailable"}
+    jobs = [(country,name,indicator) for country in MACRO_COUNTRIES.values() for name,indicator in MACRO_INDICATORS.items()]
+    results = await asyncio.gather(*(read_one(*job) for job in jobs))
+    return {"source":"World Bank Open Data API","source_url":"https://data.worldbank.org/",
+            "retrieved_at":datetime.now(timezone.utc).isoformat(),
+            "frequency":"annual","realtime":False,"trade_signal":"NONE",
+            "trade_execution_enabled":False,
+            "warning":"Historical annual macroeconomic observations. Do not interpret as breaking news, forecasts, current policy rates, or instructions to trade.",
+            "observations":results}
