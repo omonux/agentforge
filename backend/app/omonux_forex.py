@@ -515,3 +515,40 @@ async def forex_exit_monitor(profit_target_usd: float = 100, trailing_retrace_us
             "retrieved_at":datetime.now(timezone.utc).isoformat(),
             "warning":"Advisory only. Does not place or close trades. Profit peaks reset on server restart; floating P/L may be stale. Broker-native SL/TP is required for actual protection.",
             "positions":results}
+
+
+@router.get("/auto-trading/readiness")
+async def demo_auto_trading_readiness():
+    """Read-only, fail-closed readiness for autonomous demo order placement.
+
+    Never probes by sending orders. Explicitly reports unverified prerequisites.
+    """
+    checks = [
+        {"id":"demo_account","label":"MT5 demo account verified","passed":False,"detail":"Requires broker roster and account checks"},
+        {"id":"broker_session","label":"Broker session online","passed":False,"detail":"Requires a hot connected MT5 demo session"},
+        {"id":"protected_entry","label":"Broker-enforced stop loss on entry","passed":False,"detail":"Protected order POST contract not verified"},
+        {"id":"take_profit","label":"Broker take-profit placement","passed":False,"detail":"Broker TP acknowledgement and read-back not verified"},
+        {"id":"close_position","label":"Close position API and read-back","passed":False,"detail":"Closing route and idempotent reconciliation not verified"},
+        {"id":"risk_controls","label":"Durable risk limits and kill switch","passed":False,"detail":"Forex-specific persisted limits and monitoring not yet verified"},
+        {"id":"news_signals","label":"Fresh economic-event and market feeds","passed":False,"detail":"Annual World Bank indicators are historical, not trading triggers"},
+    ]
+    try:
+        account_id = _account_id()
+        roster = await _tickerall_get("/v1/accounts")
+        account = await _tickerall_get("/v1/accounts/" + account_id)
+        if isinstance(roster,list) and isinstance(account,dict):
+            row = next((a for a in roster if isinstance(a,dict) and a.get("id")==account_id),None)
+            verified = bool(row and row.get("isDemo") is True and account.get("isDemo") is True
+                            and str(row.get("broker","")).lower()=="mt5" and str(account.get("broker","")).lower()=="mt5")
+            checks[0]["passed"] = verified
+            checks[0]["detail"] = "Confirmed by roster and account" if verified else "Not confirmed in both broker views"
+            hot = bool(verified and row.get("hot") is True and str(row.get("status","")).lower() in ("online","connected")
+                       and str(account.get("status","")).lower()=="online")
+            checks[1]["passed"] = hot
+            checks[1]["detail"] = "Connected demo session" if hot else "Session offline or unverified"
+    except (ValueError,httpx.HTTPError,TypeError,AttributeError):
+        pass
+    return {"mode":"MT5_DEMO_ONLY","automatic_entry_enabled":False,"automatic_exit_enabled":False,
+            "orders_submitted":0,"ready":False,"checks":checks,
+            "next_step":"Verify protected-entry and close-position broker contracts, reconciliation and durable risk limits before enabling unattended demo orders.",
+            "notice":"Never infer profitability or broker execution from AI research or simulated orders."}
