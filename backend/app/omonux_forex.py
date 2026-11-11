@@ -548,6 +548,39 @@ async def demo_auto_trading_readiness():
             checks[1]["detail"] = "Connected demo session" if hot else "Session offline or unverified"
     except (ValueError,httpx.HTTPError,TypeError,AttributeError):
         pass
+    # Independently verify SL and TP on existing demo positions. These are
+    # broker read-back checks, not evidence that new entry orders are safe.
+    checks.extend([
+        {"id": "open_position_sl", "label": "Existing demo positions have broker stop loss",
+         "passed": False, "detail": "No verified protected open positions yet"},
+        {"id": "open_position_tp", "label": "Existing demo positions have broker take profit",
+         "passed": False, "detail": "No verified take-profit levels on open positions yet"},
+    ])
+    if checks[0]["passed"] and checks[1]["passed"]:
+        try:
+            snapshot = await _tickerall_get("/v1/accounts/" + account_id + "/positions")
+            positions = _normalize_demo_positions(snapshot)
+            if positions:
+                sl_ok = all(p["ticket"] and p["stop_loss_status"] == "set"
+                            for p in positions)
+                tp_ok = all(p["ticket"] and p["take_profit_status"] == "set"
+                            for p in positions)
+                checks[-2]["passed"] = bool(sl_ok)
+                checks[-1]["passed"] = bool(tp_ok)
+                checks[-2]["detail"] = (
+                    f"Broker read-back confirms stop loss on all {len(positions)} open demo positions"
+                    if sl_ok else "One or more open demo positions lack a verified broker stop loss"
+                )
+                checks[-1]["detail"] = (
+                    f"Broker read-back confirms take profit on all {len(positions)} open demo positions"
+                    if tp_ok else "One or more open demo positions lack a verified broker take profit"
+                )
+            else:
+                checks[-2]["detail"] = "No open demo positions to verify"
+                checks[-1]["detail"] = "No open demo positions to verify"
+        except (ValueError, httpx.HTTPError, TypeError, AttributeError):
+            checks[-2]["detail"] = "Broker position read-back unavailable"
+            checks[-1]["detail"] = "Broker position read-back unavailable"
     # Confirm durable Forex risk storage only when the required persisted
     # controls are present. A database connection alone is not sufficient.
     try:
