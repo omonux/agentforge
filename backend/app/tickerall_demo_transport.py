@@ -65,24 +65,73 @@ async def list_broker_symbols(account_id: str) -> dict[str, Any]:
 
 async def submit_demo_market_order(account_id: str, *, symbol: str,
                                    side: str, volume: float,
-                                   idempotency_key: str) -> dict[str, Any]:
-    """Fail-closed transport: broker-enforced stop-loss capability unverified."""
+                                   idempotency_key: str,
+                                   stop_loss: float | None = None,
+                                   take_profit: float | None = None) -> dict[str, Any]:
+    """Submit a protected MT5 DEMO market order and verify broker position.
+
+    This primitive is not exposed as an HTTP endpoint or scheduled worker.
+    No caller may omit both broker-native protective levels.
+    """
+    import math
     if os.getenv("TICKERALL_DEMO_EXECUTION_TRANSPORT") != "enabled":
         raise BrokerUnavailable("Demo execution transport not authorized")
+    _id(account_id)
     if not SYMBOL.fullmatch(symbol):
         raise ValueError("Invalid broker symbol")
     if side not in ("BUY", "SELL"):
         raise ValueError("Invalid side")
-    if not isinstance(volume, (float, int)) or isinstance(volume, bool) or not (0 < volume <= 1):
+    if not isinstance(volume, (float, int)) or isinstance(volume, bool) or not math.isfinite(volume) or not (0 < volume <= 1):
         raise ValueError("Invalid demo lot volume")
+    for name, price in (("stop loss", stop_loss), ("take profit", take_profit)):
+        if isinstance(price, bool) or not isinstance(price, (float, int)) or not math.isfinite(price) or price <= 0:
+            raise ValueError(f"Valid broker-enforced {name} required")
     try:
         uuid.UUID(idempotency_key)
     except (ValueError, TypeError, AttributeError):
         raise ValueError("Invalid idempotency key") from None
-    _id(account_id)
-    # Provider order payload has no verified broker-enforced protective stop.
-    # No order POST is reachable until a safe broker contract is implemented.
-    raise BrokerUnavailable("Demo market orders blocked until broker-enforced stop loss is verified")
+    account = await get_demo_account(account_id)
+    roster = await _request("GET", "/v1/accounts")
+    if not isinstance(roster, list):
+        raise BrokerUnavailable("Broker roster unavailable")
+    row = next((x for x in roster if isinstance(x, dict) and x.get("id") == account_id), None)
+    if (not row or row.get("isDemo") is not True or
+            str(row.get("broker", "")).lower() != "mt5" or
+            str(account.get("broker", "")).lower() != "mt5" or
+            row.get("hot") is not True or
+            str(row.get("status", "")).lower() not in ("online", "connected") or
+            str(account.get("status", "")).lower() != "online"):
+        raise BrokerUnavailable("MT5 demo account and hot session unverified")
+    before = await _request("GET", f"/v1/accounts/{account_id}/positions")
+    positions = before if isinstance(before, list) else before.get("positions")
+    if not isinstance(positions, list) or len(positions) != 0:
+        raise BrokerUnavailable("Account must be flat and position roster verified before entry")
+    payload = {"type": "market", "symbol": symbol, "side": side,
+               "volume": volume, "stopLoss": stop_loss,
+               "takeProfit": take_profit, "comment": "AgentForge-demo"}
+    result = await _request("POST", f"/v1/accounts/{account_id}/orders",
+                            payload=payload, idempotency_key=idempotency_key)
+    if not isinstance(result, dict) or result.get("status") != "open":
+        raise BrokerUnavailable("Order response uncertain; reconcile broker before retry")
+    ticket = str(result.get("ticket", ""))
+    if not re.fullmatch(r"[0-9]{1,20}", ticket):
+        raise BrokerUnavailable("Order ticket missing; reconcile broker before retry")
+    after = await _request("GET", f"/v1/accounts/{account_id}/positions")
+    current = after if isinstance(after, list) else after.get("positions")
+    if not isinstance(current, list):
+        raise BrokerUnavailable("Order placed; position read-back unavailable")
+    matching = [p for p in current if isinstance(p, dict) and str(p.get("ticket")) == ticket]
+    if len(matching) != 1:
+        raise BrokerUnavailable("Order response received but position unconfirmed; reconcile broker")
+    p = matching[0]
+    if (p.get("symbol") != symbol or p.get("side") != side or
+            not isinstance(p.get("stopLoss"), (int, float)) or
+            not isinstance(p.get("takeProfit"), (int, float)) or
+            abs(p["stopLoss"] - stop_loss) > 1e-7 or
+            abs(p["takeProfit"] - take_profit) > 1e-7):
+        raise BrokerUnavailable("Position exists but protective levels not confirmed; inspect MT5 immediately")
+    return {"ticket": ticket, "confirmed_open": True, "mode": "demo",
+            "stop_loss": p["stopLoss"], "take_profit": p["takeProfit"]}
 
 
 async def close_demo_position_verified(account_id: str, *, ticket: str, idempotency_key: str) -> dict[str, Any]:
