@@ -81,3 +81,40 @@ async def submit_demo_market_order(account_id: str, *, symbol: str,
     # Provider order payload has no verified broker-enforced protective stop.
     # No order POST is reachable until a safe broker contract is implemented.
     raise BrokerUnavailable("Demo market orders blocked until broker-enforced stop loss is verified")
+
+
+async def close_demo_position_verified(account_id: str, *, ticket: str, idempotency_key: str) -> dict[str, Any]:
+    """Full-close ONE MT5 demo position, verify absence in a fresh broker snapshot.
+
+    This is a transport primitive, not an autonomous trading scheduler. An uncertain
+    response is never blindly retried with a different idempotency key.
+    """
+    if os.getenv("TICKERALL_DEMO_CLOSE_TRANSPORT") != "enabled":
+        raise BrokerUnavailable("Demo close transport not authorized")
+    _id(account_id)
+    if not re.fullmatch(r"[0-9]{1,20}", str(ticket)):
+        raise ValueError("Invalid position ticket")
+    try:
+        uuid.UUID(idempotency_key)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("Invalid idempotency key") from None
+    account = await get_demo_account(account_id)
+    if str(account.get("broker","")).lower() != "mt5" or str(account.get("status","")).lower() != "online":
+        raise BrokerUnavailable("MT5 demo session is not verified online")
+    before = await _request("GET", f"/v1/accounts/{account_id}/positions")
+    rows = before.get("positions")
+    if not isinstance(rows,list):
+        raise BrokerUnavailable("Position roster unavailable")
+    matching = [p for p in rows if isinstance(p,dict) and str(p.get("ticket")) == str(ticket)]
+    if len(matching) != 1:
+        raise BrokerUnavailable("Ticket is not uniquely open; inspect broker before retrying")
+    result = await _request("DELETE", f"/v1/accounts/{account_id}/positions/{ticket}",
+                            idempotency_key=idempotency_key)
+    if result.get("closed") is not True or str(result.get("ticket")) != str(ticket):
+        raise BrokerUnavailable("Broker close response unconfirmed; inspect MT5")
+    after = await _request("GET", f"/v1/accounts/{account_id}/positions")
+    current = after.get("positions")
+    if not isinstance(current,list) or any(isinstance(p,dict) and str(p.get("ticket")) == str(ticket) for p in current):
+        raise BrokerUnavailable("Close submitted but ticket remains or broker snapshot invalid; inspect MT5")
+    return {"ticket":str(ticket),"confirmed_closed":True,"mode":"demo",
+            "deal_ticket":result.get("dealTicket"),"broker_profit":result.get("profit")}
