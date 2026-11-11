@@ -19,6 +19,7 @@ export default function OmonuxForex(){
  const [macroError,setMacroError]=useState("");
  const [preflight,setPreflight]=useState<any>(null);
  const [exitMonitor,setExitMonitor]=useState<any>(null);
+ const [autoReadiness,setAutoReadiness]=useState<any>(null);
  const [exitTarget,setExitTarget]=useState("100");
  const [exitRetrace,setExitRetrace]=useState("30");
  const [positions,setPositions]=useState<any>(null);
@@ -221,6 +222,13 @@ export default function OmonuxForex(){
   {positions&&<div className="taskrow"><span><b>Open MT5 demo positions: {positions.count}</b><small>Read-only broker snapshot. Stop status distinguishes set, explicitly unset, and unknown broker values. This does not authorize execution.</small><small>Stops: {positions.stop_status_counts?.set??0} set · {positions.stop_status_counts?.not_set??0} not set · {positions.stop_status_counts?.unknown??0} unknown</small>
    {positions.count===0?<small>No open positions reported at the time of this check.</small>:<div style={{overflowX:"auto"}}><table><thead><tr><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Stop loss</th><th>Take profit</th><th>P/L</th><th>Magic</th><th>Ticket</th></tr></thead><tbody>{positions.positions.map((p:any,i:number)=><tr key={p.ticket||i}><td>{p.symbol||"Unknown"}</td><td>{p.side||"Unknown"}</td><td>{p.volume??"Unknown"}</td><td>{p.open_price??"Unknown"}</td><td>{p.stop_loss_status==="set"?p.stop_loss:p.stop_loss_status==="not_set"?"Not set":"Unknown — verify in MT5"}</td><td>{p.take_profit_status==="set"?p.take_profit:p.take_profit_status==="not_set"?"Not set":"Unknown"}</td><td>{p.profit??"Unknown"}</td><td>{p.magic??"Unknown"}</td><td>{p.ticket||"Unknown"}</td></tr>)}</tbody></table></div>}
   </span></div>}
+  {tab==="overview"&&<div style={{padding:24,borderRadius:22,background:"linear-gradient(115deg,#173c3c,#1b284a)",border:"1px solid #3e7b8d",color:"white"}}>
+   <div style={{color:"#92e6ff",fontSize:12,fontWeight:800,letterSpacing:2}}>AUTONOMOUS MT5 DEMO · SAFETY READINESS</div>
+   <h3 style={{fontSize:25,color:"white",margin:"10px 0"}}>Automatic trading prerequisites</h3>
+   <p style={{color:"#c9def3"}}>Check which broker capabilities are actually verified before enabling an unattended trading engine. This diagnostic does not submit orders.</p>
+   <button disabled={busy} onClick={()=>get("/api/v1/trading/forex/auto-trading/readiness",setAutoReadiness)}>↻ Check automatic trading readiness</button>
+   {autoReadiness&&<><p style={{color:autoReadiness.ready?"#86efac":"#fbbf91",fontWeight:800}}>{autoReadiness.ready?"Ready for reviewed demo enablement":"AUTO-TRADING BLOCKED — prerequisites incomplete"}</p><div style={{display:"grid",gap:8}}>{autoReadiness.checks.map((c:any)=><div key={c.id} style={{padding:12,borderRadius:10,background:"#14243d",border:"1px solid #36546b"}}><b style={{color:c.passed?"#86efac":"#fca5a5"}}>{c.passed?"✓":"✕"} {c.label}</b><div style={{fontSize:12,color:"#c4d8ec",marginTop:4}}>{c.detail}</div></div>)}</div><p style={{color:"#fbd38d",fontSize:12}}>{autoReadiness.next_step}</p></>}
+  </div>}
   {tab==="overview"&&<div style={{padding:24,borderRadius:22,background:"linear-gradient(115deg,#3a254d,#172c50)",border:"1px solid #8067b1",color:"white"}}>
    <div style={{letterSpacing:2,color:"#e2b9ff",fontSize:12,fontWeight:800}}>POSITION EXIT INTELLIGENCE · DEMO</div>
    <h3 style={{color:"white",fontSize:25,margin:"10px 0"}}>Profit targets & trailing-gain monitor</h3>
