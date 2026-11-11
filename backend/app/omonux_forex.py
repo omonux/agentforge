@@ -548,6 +548,31 @@ async def demo_auto_trading_readiness():
             checks[1]["detail"] = "Connected demo session" if hot else "Session offline or unverified"
     except (ValueError,httpx.HTTPError,TypeError,AttributeError):
         pass
+    # Confirm durable Forex risk storage only when the required persisted
+    # controls are present. A database connection alone is not sufficient.
+    try:
+        import psycopg
+        dsn = os.getenv("DATABASE_URL", "").strip()
+        if dsn.startswith(("postgresql://", "postgres://")):
+            with psycopg.connect(dsn, connect_timeout=3) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT to_regclass('agentforge.forex_demo_limits') IS NOT NULL"
+                    )
+                    has_limits = bool(cur.fetchone()[0])
+                    if has_limits:
+                        cur.execute(
+                            "SELECT kill_switch, max_daily_loss_pct, max_open_positions, "
+                            "max_trades_per_day FROM agentforge.forex_demo_limits "
+                            "WHERE account_id = %s", (account_id,)
+                        )
+                        limits = cur.fetchone()
+                        if limits and limits[0] is True and 0 < float(limits[1]) <= 2 and limits[2] == 1 and 1 <= limits[3] <= 5:
+                            checks[5]["detail"] = "Persisted Neon limits found; broker-side enforcement and monitoring still require verification"
+                        else:
+                            checks[5]["detail"] = "Neon risk table exists; account-specific limits or emergency stop not verified"
+    except (ImportError, Exception):
+        pass
     # An implemented transport is not proof of broker acceptance or durable risk enforcement.
     return {"mode":"MT5_DEMO_ONLY","automatic_entry_enabled":False,"automatic_exit_enabled":False,
             "orders_submitted":0,"ready":False,"checks":checks,
