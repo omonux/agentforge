@@ -14,6 +14,9 @@ export default function OmonuxForex(){
  const [verified,setVerified]=useState(false);
  const [candles,setCandles]=useState<any>(null);
  const [research,setResearch]=useState<any>(null);
+ const [macro,setMacro]=useState<any>(null);
+ const [macroLoading,setMacroLoading]=useState(false);
+ const [macroError,setMacroError]=useState("");
  const [preflight,setPreflight]=useState<any>(null);
  const [positions,setPositions]=useState<any>(null);
  const [error,setError]=useState("");
@@ -122,6 +125,12 @@ export default function OmonuxForex(){
   const id=window.setInterval(()=>{if(!document.hidden)void refreshAccountSummary()},30000);
   return ()=>window.clearInterval(id);
  },[status?.account_configured,autoRefresh]);
+ async function loadMacro(){
+  setMacroLoading(true);setMacroError("");
+  try{setMacro(await requestJson("/api/v1/trading/forex/macro-intelligence"))}
+  catch(e){setMacroError(e instanceof Error?e.message:"Macroeconomic feed unavailable")}
+  finally{setMacroLoading(false)}
+ }
  async function refreshStatus(){
   setStatusLoading(true);
   try{
@@ -214,6 +223,16 @@ export default function OmonuxForex(){
   {accounts.filter(a=>a.is_demo).length>1&&<label>Demo account <select value={selectedAccountId} onChange={e=>{setSelectedAccountId(e.target.value);setVerified(false)}}>{accounts.filter(a=>a.is_demo).map(a=><option key={a.id} value={a.id}>{a.server||"MT5"} · {a.id}</option>)}</select></label>}
   {verified&&<p role="status">Demo account verified successfully. Broker execution remains disabled.</p>}
   </>}
+  {tab==="research"&&<div style={{padding:24,borderRadius:20,background:"linear-gradient(135deg,#173b57,#26214f)",border:"1px solid #456a95",color:"white"}}>
+   <div style={{color:"#9de9ff",fontSize:12,letterSpacing:2,fontWeight:800}}>GLOBAL ECONOMIC INTELLIGENCE · PUBLIC DATA</div>
+   <h3 style={{fontSize:25,color:"white",margin:"10px 0"}}>Economic fundamentals across major currencies</h3>
+   <p style={{color:"#c7d9f3",lineHeight:1.6}}>Fetch published inflation, GDP growth and unemployment figures for the United States, United Kingdom, Euro Area, Japan and Switzerland. Data comes from the World Bank and may be years old; it is not breaking news or a live trade signal.</p>
+   <button disabled={macroLoading} onClick={()=>void loadMacro()}>{macroLoading?"Loading World Bank data…":"↻ Fetch economic indicators"}</button>
+   {macroError&&<p role="alert" style={{color:"#ffb4b4"}}>{macroError}</p>}
+   {macro&&<><p style={{color:"#b9d5ef",fontSize:12}}>Source: <a href={macro.source_url} target="_blank" rel="noreferrer" style={{color:"#8de8ff"}}>{macro.source}</a> · Retrieved {new Date(macro.retrieved_at).toLocaleString()} · Annual historical data · Trade execution disabled</p>
+   <div style={{overflowX:"auto"}}><table><thead><tr><th>Economy</th><th>Indicator</th><th>Published value</th><th>Year</th><th>Feed status</th></tr></thead><tbody>{macro.observations.map((o:any,i:number)=><tr key={i}><td>{({USA:"United States",GBR:"United Kingdom",EMU:"Euro Area",JPN:"Japan",CHE:"Switzerland"} as Record<string,string>)[o.country]||o.country}</td><td>{({inflation_consumer_pct:"Inflation (CPI)",gdp_growth_pct:"GDP growth",unemployment_pct:"Unemployment"} as Record<string,string>)[o.indicator]||o.indicator}</td><td>{o.status==="available"?o.value+"%":"—"}</td><td>{o.year||"—"}</td><td style={{color:o.status==="available"?"#86efac":"#fca5a5"}}>{o.status}</td></tr>)}</tbody></table></div>
+   <p style={{color:"#fbd38d",fontSize:12}}>Historical context only. No economic-calendar, news, exchange order or automatic trade integration is claimed here.</p></>}
+  </div>}
   {tab==="research"&&<><div className="omx-auto-grid"><label>Forex pair<select value={symbol} onChange={e=>{setSymbol(e.target.value);setCandles(null);setResearch(null)}}><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option><option value="USDJPY">USD/JPY</option></select></label></div>
   <div className="actions"><button className="secondary" disabled={busy||!status?.account_configured} onClick={()=>get("/api/v1/trading/forex/candles/"+symbol+"?timeframe=M30&hours=72",setCandles)}>Test 30-minute candles</button></div>
   <div className="actions"><button className="secondary" disabled={busy||!status?.account_configured} onClick={()=>get("/api/v1/trading/forex/research/"+symbol+"?timeframe=M30&hours=168",setResearch)}>Run 12-agent Forex research</button></div>
