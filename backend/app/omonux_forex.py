@@ -178,14 +178,44 @@ async def forex_account(account_id: str | None = None):
 
 
 def _safe_position_number(value):
-    """Expose only finite numeric broker fields, never raw broker metadata."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    """Return finite broker numeric values, including numeric strings."""
+    if isinstance(value, bool):
         return None
-    return value if math.isfinite(value) else None
+    if not isinstance(value, (int, float, str)):
+        return None
+    try:
+        result = float(value)
+    except (ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _first_present(position, *keys):
+    """Choose the first present non-null field, preserving zero as meaningful."""
+    for key in keys:
+        if key in position and position[key] is not None:
+            return position[key]
+    return None
+
+
+def _broker_price(position, *keys):
+    value = _first_present(position, *keys)
+    return _safe_position_number(value)
+
+
+def _stop_status(position, keys):
+    """Unknown is not the same as absent. A zero broker stop means unset."""
+    raw = _first_present(position, *keys)
+    if raw is None:
+        return "unknown"
+    number = _safe_position_number(raw)
+    if number is None or number < 0:
+        return "unknown"
+    return "set" if number > 0 else "not_set"
 
 
 def _normalize_demo_positions(payload):
-    """Fail closed on malformed broker responses; do not silently report flat."""
+    """Allowlist broker fields; never claim stop protection without evidence."""
     if isinstance(payload, list):
         rows = payload
     elif isinstance(payload, dict) and isinstance(payload.get("positions"), list):
@@ -195,17 +225,24 @@ def _normalize_demo_positions(payload):
     if len(rows) > 1000 or any(not isinstance(p, dict) for p in rows):
         raise ValueError("TickerAll positions response invalid")
     positions = []
+    sl_keys = ("stopLoss", "stop_loss", "sl", "stopLossPrice", "stop_loss_price")
+    tp_keys = ("takeProfit", "take_profit", "tp", "takeProfitPrice", "take_profit_price")
     for p in rows:
+        side = _first_present(p, "side", "type", "direction")
+        if isinstance(side, (int, float)) and not isinstance(side, bool):
+            side = {0: "BUY", 1: "SELL"}.get(side, "UNKNOWN")
         positions.append({
-            "ticket": str(p["ticket"])[:80] if p.get("ticket") is not None else None,
+            "ticket": str(_first_present(p, "ticket", "positionId", "position_id", "id"))[:80] if _first_present(p, "ticket", "positionId", "position_id", "id") is not None else None,
             "symbol": str(p["symbol"])[:80] if p.get("symbol") is not None else None,
-            "side": str(p.get("side") or p.get("type") or "UNKNOWN")[:32],
-            "volume": _safe_position_number(p.get("volume")),
-            "open_price": _safe_position_number(p.get("openPrice")),
-            "stop_loss": _safe_position_number(p.get("stopLoss")),
-            "take_profit": _safe_position_number(p.get("takeProfit")),
-            "profit": _safe_position_number(p.get("profit")),
-            "magic": p.get("magic") if type(p.get("magic")) is int else None,
+            "side": str(side or "UNKNOWN")[:32],
+            "volume": _broker_price(p, "volume", "lots", "lot"),
+            "open_price": _broker_price(p, "openPrice", "priceOpen", "price_open", "open_price", "entryPrice", "entry_price", "price"),
+            "stop_loss": _broker_price(p, *sl_keys),
+            "take_profit": _broker_price(p, *tp_keys),
+            "stop_loss_status": _stop_status(p, sl_keys),
+            "take_profit_status": _stop_status(p, tp_keys),
+            "profit": _broker_price(p, "profit", "floatingProfit", "floating_profit"),
+            "magic": int(p["magic"]) if type(p.get("magic")) is int else None,
         })
     return positions
 
@@ -229,7 +266,10 @@ async def forex_open_positions():
         positions = _normalize_demo_positions(raw)
         return {"positions": positions, "count": len(positions),
                 "account_id": account_id, "execution_enabled": False,
-                "source": "TickerAll MT5 demo read-only positions"}
+                "source": "TickerAll MT5 demo read-only positions",
+                "stop_verification": "broker_snapshot_only_not_execution_authorization",
+                "stop_status_counts": {status: sum(p["stop_loss_status"] == status for p in positions)
+                                       for status in ("set", "not_set", "unknown")}}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except (httpx.HTTPError, TypeError, AttributeError) as exc:
