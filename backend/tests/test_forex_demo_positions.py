@@ -1,11 +1,11 @@
 """Regression tests for demo-only read-only MT5 positions."""
 import pytest
+import asyncio
 from fastapi import HTTPException
 from app import omonux_forex as forex
 
 
-@pytest.mark.asyncio
-async def test_positions_reads_only_verified_demo(monkeypatch):
+def test_positions_reads_only_verified_demo(monkeypatch):
     calls = []
     async def fake_get(path, params=None):
         calls.append(path)
@@ -20,7 +20,7 @@ async def test_positions_reads_only_verified_demo(monkeypatch):
         raise AssertionError(path)
     monkeypatch.setattr(forex, "_tickerall_get", fake_get)
     monkeypatch.setattr(forex, "_account_id", lambda: "demo12345")
-    result = await forex.forex_open_positions()
+    result = asyncio.run(forex.forex_open_positions())
     assert result["count"] == 1
     assert result["positions"][0]["stop_loss"] == 1.09
     assert result["positions"][0]["magic"] == 0
@@ -29,8 +29,7 @@ async def test_positions_reads_only_verified_demo(monkeypatch):
     assert result["execution_enabled"] is False
 
 
-@pytest.mark.asyncio
-async def test_live_account_never_reads_positions(monkeypatch):
+def test_live_account_never_reads_positions(monkeypatch):
     calls = []
     async def fake_get(path, params=None):
         calls.append(path)
@@ -38,7 +37,7 @@ async def test_live_account_never_reads_positions(monkeypatch):
     monkeypatch.setattr(forex, "_tickerall_get", fake_get)
     monkeypatch.setattr(forex, "_account_id", lambda: "demo12345")
     with pytest.raises(HTTPException) as exc:
-        await forex.forex_open_positions()
+        asyncio.run(forex.forex_open_positions())
     assert exc.value.status_code == 422
     assert calls == ["/v1/accounts"]
 
