@@ -113,19 +113,41 @@ export default function OmonuxForex(){
   catch(e){setError(e instanceof Error?e.message:"Connection failed")}
   finally{setBusy(false)}
  }
- return <section className="omx-auto-section" style={{marginTop:24,display:"grid",gap:16}}>
-  <div style={{borderRadius:20,padding:"26px 24px",background:"linear-gradient(120deg,#0b1732,#123b55 65%,#0c5752)",color:"#fff"}}>
-   <div style={{fontSize:12,letterSpacing:2,fontWeight:700,opacity:.8}}>OMONUX / FOREX INTELLIGENCE</div>
-   <h2 style={{color:"#fff",fontSize:"clamp(24px,3vw,36px)",margin:"12px 0 6px"}}>Your Forex command center</h2>
-   <p style={{color:"#d6e9ef",maxWidth:680}}>Explore real broker data, review AI research and practice disciplined entries with simulated stops and targets. Live broker execution stays off.</p>
-   <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:18}}>
-    <span style={{padding:"8px 12px",borderRadius:24,background:"#ffffff20"}}>● {status?.feed_configured?"TickerAll connected":"Connection not verified"}</span>
-    <span style={{padding:"8px 12px",borderRadius:24,background:"#ffffff20"}}>MT5 · Demo only</span>
-    <span style={{padding:"8px 12px",borderRadius:24,background:"#ffffff20"}}>Broker orders disabled</span>
+ return <section className="omx-auto-section forex-premium" style={{marginTop:24,display:"grid",gap:16}}>
+
+  <style>{".forex-premium .fx-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}.forex-premium .fx-card{padding:22px;border-radius:20px;background:linear-gradient(135deg,#1d305b,#111b38);border:1px solid #40557b;color:#fff;box-shadow:0 12px 28px #0002}.forex-premium .fx-card strong{display:block;font-size:30px;margin:8px 0;color:#fff}.forex-premium .fx-card small{color:#c0d4ee}.forex-premium .fx-operations{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:13px}.forex-premium .fx-operation{padding:20px;border-radius:18px;background:linear-gradient(135deg,#233a6b,#172746);border:1px solid #47658d;color:#d6e9ff}.forex-premium .fx-operation b{display:block;color:#fff;font-size:17px;margin:10px 0}.forex-premium .fx-operation p{font-size:13px;line-height:1.6}.forex-premium .fx-tabs{display:flex;flex-wrap:wrap;gap:10px;padding:12px;background:#101d38;border-radius:20px;border:1px solid #3b5276}.forex-premium .fx-tabs button{flex:1 1 190px;padding:16px;border-radius:13px;font-weight:800}.forex-premium .fx-tabs button.fx-selected{background:linear-gradient(100deg,#7c3aed,#2563eb,#0891b2);color:white;border-color:transparent}.forex-premium .taskrow{background:linear-gradient(135deg,#1b2d53,#13213d);border:1px solid #3d5277;border-radius:18px;padding:18px}.forex-premium .taskrow small{display:block;line-height:1.6;margin-top:7px}.forex-premium input,.forex-premium select{border-radius:10px;padding:10px}.forex-premium button{transition:transform .15s}.forex-premium button:hover:not(:disabled){transform:translateY(-2px)}.forex-premium table{min-width:620px;width:100%;border-collapse:collapse}.forex-premium th{background:#233c6b;padding:12px}.forex-premium td{padding:11px;border-bottom:1px solid #364c6f}"}</style>
+  <div style={{padding:"clamp(24px,4vw,48px)",borderRadius:25,background:"radial-gradient(circle at 85% 15%,#7c3aed77,transparent 45%),radial-gradient(circle at 5% 90%,#06b6d455,transparent 50%),linear-gradient(120deg,#101936,#1a3559)",color:"white",border:"1px solid #4d5b89"}}>
+   <div style={{fontSize:12,letterSpacing:2.5,fontWeight:800,color:"#9de9ff"}}>◆ OMONUX · FOREX OPERATIONS CENTER</div>
+   <h2 style={{fontSize:"clamp(30px,5vw,54px)",lineHeight:1.1,color:"white",margin:"18px 0",fontWeight:900}}>Trade intelligence.<br/><span style={{color:"#9de9ff"}}>Beautifully organized.</span></h2>
+   <p style={{fontSize:16,color:"#d2e5fa",maxWidth:720,lineHeight:1.7}}>Your premium workspace for MT5 demo positions, risk protection, 12-agent research and paper execution. Every operation has its own room.</p>
+   <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:22}}>
+    <span style={{background:"#115e59",borderRadius:25,padding:"10px 16px",fontWeight:700}}>● TickerAll {status?.feed_configured?"connected":"not verified"}</span>
+    <span style={{background:"#2b4582",borderRadius:25,padding:"10px 16px",fontWeight:700}}>◈ MT5 Demo</span>
+    <span style={{background:"#7f334b",borderRadius:25,padding:"10px 16px",fontWeight:700}}>◆ New broker orders locked</span>
    </div>
   </div>
-  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-   {(["overview","research","paper"] as const).map(t=><button key={t} className={tab===t?"":"secondary"} onClick={()=>setTab(t)}>{t==="overview"?"① Connection & positions":t==="research"?"② AI research":"③ Paper execution lab"}</button>)}
+  <div className="fx-cards">
+   <div className="fx-card" style={{borderTop:"4px solid #10b981"}}><small>DATA CONNECTION</small><strong>{statusLoading?"…":status?.feed_configured?"Online":"Check"}</strong><small>TickerAll integration</small></div>
+   <div className="fx-card" style={{borderTop:"4px solid #8b5cf6"}}><small>OPEN MT5 POSITIONS</small><strong>{positions?.count??"—"}</strong><small>{positions?"Broker snapshot loaded":"Load broker positions"}</small></div>
+   <div className="fx-card" style={{borderTop:"4px solid #f59e0b"}}><small>WITHOUT STOP LOSS</small><strong>{positions?.stop_status_counts?.not_set??"—"}</strong><small>{positions?"Needs review":"Awaiting position check"}</small></div>
+   <div className="fx-card" style={{borderTop:"4px solid #06b6d4"}}><small>SIMULATED TRADES</small><strong>{paperTrades.length}</strong><small>Local session journal</small></div>
+  </div>
+  <div style={{padding:24,borderRadius:22,background:"linear-gradient(135deg,#152644,#1b2853)",border:"1px solid #40517d"}}>
+   <div style={{color:"#93e7ff",fontWeight:800,letterSpacing:2,fontSize:12}}>EXPLORE YOUR WORKSPACE</div>
+   <h3 style={{color:"white",fontSize:26,margin:"10px 0 20px"}}>Four powerful trading operations</h3>
+   <div className="fx-operations">
+    <div className="fx-operation"><span style={{fontSize:28}}>🔗</span><b>Broker connectivity</b><p>Check your TickerAll connection, verify your MT5 demo account and inspect broker status.</p></div>
+    <div className="fx-operation"><span style={{fontSize:28}}>🛡️</span><b>Position protection</b><p>Find missing stops, review exposure and request one-at-a-time demo protection.</p></div>
+    <div className="fx-operation"><span style={{fontSize:28}}>🧠</span><b>12-agent research</b><p>Analyze closed candles, market direction, council votes and research risks.</p></div>
+    <div className="fx-operation"><span style={{fontSize:28}}>📊</span><b>Paper execution lab</b><p>Practice entries, stop losses, take profits and review your simulation journal.</p></div>
+   </div>
+  </div>
+  <div className="fx-tabs">
+   {(["overview","research","paper"] as const).map(t=><button key={t} className={tab===t?"fx-selected":"secondary"} onClick={()=>setTab(t)}>{t==="overview"?"◈ Connection & positions":t==="research"?"✦ AI research council":"◇ Paper execution lab"}</button>)}
+  </div>
+  <div style={{padding:"18px 22px",background:"linear-gradient(90deg,#2b2464,#173b60)",borderRadius:17,border:"1px solid #5a65a1"}}>
+   <b style={{fontSize:21,color:"white"}}>{tab==="overview"?"Broker connection & protective stops":tab==="research"?"Multi-agent market intelligence":"Risk-controlled paper trading"}</b>
+   <p style={{color:"#d1e3fa",marginBottom:0}}>{tab==="overview"?"Inspect MT5 demo exposure and broker-reported protection.":tab==="research"?"Run real candle research; no orders are placed.":"Practice with a virtual $100 balance; this does not transmit orders to MT5."}</p>
   </div>
   {tab==="overview"&&<><p className="muted">AgentForge Connect API · Read-only Forex integration. Your API key stays in Render, never in this browser or the GitHub repository.</p>
   <p><b>API key:</b> {statusLoading?"Checking…":status===null?"Unavailable — status request failed":status.feed_configured?"Configured in Render":"Not configured"} · <b>MT5 account ID:</b> {statusLoading?"Checking…":status===null?"Unavailable — status request failed":status.account_configured?"Configured":"Not configured"} · <b>Broker order execution:</b> Disabled</p>
