@@ -5,6 +5,8 @@ type Account={id:string;broker?:string;server?:string;is_demo?:boolean;status?:s
 export default function OmonuxForex(){
  const [status,setStatus]=useState<Status|null>(null);
  const [accounts,setAccounts]=useState<Account[]>([]);
+ const [accountSummary,setAccountSummary]=useState<any>(null);
+ const [accountCheckedAt,setAccountCheckedAt]=useState("");
  const [selectedAccountId,setSelectedAccountId]=useState("");
  const [verified,setVerified]=useState(false);
  const [candles,setCandles]=useState<any>(null);
@@ -98,6 +100,12 @@ export default function OmonuxForex(){
   if(!response.ok)throw Error(typeof data?.detail==="string"?data.detail:"Forex API request failed (HTTP "+response.status+").");
   return data;
  }
+ async function refreshAccountSummary(){
+  setBusy(true);setError("");
+  try{const data=await requestJson("/api/v1/trading/forex/account");setAccountSummary(data);setAccountCheckedAt(new Date().toLocaleTimeString())}
+  catch(e){setError(e instanceof Error?e.message:"Unable to load MT5 account figures")}
+  finally{setBusy(false)}
+ }
  async function refreshStatus(){
   setStatusLoading(true);
   try{
@@ -125,6 +133,22 @@ export default function OmonuxForex(){
     <span style={{background:"#2b4582",borderRadius:25,padding:"10px 16px",fontWeight:700}}>◈ MT5 Demo</span>
     <span style={{background:"#7f334b",borderRadius:25,padding:"10px 16px",fontWeight:700}}>◆ New broker orders locked</span>
    </div>
+  </div>
+  <div style={{padding:24,borderRadius:22,background:"linear-gradient(115deg,#113c3c,#162850 55%,#37235e)",border:"1px solid #467e91",color:"white"}}>
+   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}><div><div style={{letterSpacing:2,fontSize:12,color:"#9de9ff",fontWeight:800}}>MT5 DEMO · ACCOUNT PERFORMANCE</div><h3 style={{color:"white",fontSize:26,margin:"8px 0"}}>Is your $100,000 growing?</h3><p style={{color:"#c7d9f1",margin:0}}>Balance is closed-trade money. Equity includes open positions. Floating P/L changes as prices move.</p></div><button disabled={busy||!status?.account_configured} onClick={()=>void refreshAccountSummary()}>↻ Refresh broker figures</button></div>
+   {accountSummary?.account?(()=>{
+    const a=accountSummary.account;
+    const balance=Number(a.balance),equity=Number(a.equity);
+    const valid=Number.isFinite(balance)&&Number.isFinite(equity)&&a.balance!=null&&a.equity!=null;
+    const floating=equity-balance, baseline=100000;
+    const money=(v:number)=>v.toLocaleString("en-US",{style:"currency",currency:"USD"});
+    return <><div className="fx-cards" style={{marginTop:22}}>
+      <div className="fx-card" style={{borderTop:"4px solid #06b6d4"}}><small>ACCOUNT BALANCE</small><strong>{Number.isFinite(balance)&&a.balance!=null?money(balance):"—"}</strong><small>Realized balance · MT5 demo</small></div>
+      <div className="fx-card" style={{borderTop:"4px solid #8b5cf6"}}><small>CURRENT EQUITY</small><strong>{Number.isFinite(equity)&&a.equity!=null?money(equity):"—"}</strong><small>Includes unrealized P/L</small></div>
+      <div className="fx-card" style={{borderTop:"4px solid "+(floating>=0?"#10b981":"#ef4444")}}><small>FLOATING PROFIT / LOSS</small><strong style={{color:floating>=0?"#86efac":"#fca5a5"}}>{valid?(floating>=0?"+":"")+money(floating):"—"}</strong><small>{valid?(floating>=0?"Open positions currently positive":"Open positions currently negative"):"Awaiting broker data"}</small></div>
+      <div className="fx-card" style={{borderTop:"4px solid "+(equity>=baseline?"#10b981":"#ef4444")}}><small>EQUITY VS $100K REFERENCE</small><strong style={{color:equity>=baseline?"#86efac":"#fca5a5"}}>{valid?(equity>=baseline?"+":"")+money(equity-baseline):"—"}</strong><small>Reference only; deposits and withdrawals not adjusted</small></div>
+     </div><p style={{fontSize:12,color:"#b7cce6",marginTop:14}}>Last checked: {accountCheckedAt||"—"} · Snapshot on demand, not a streaming feed. Demo funds only. Broker data may be delayed.</p></>
+   })():<p style={{color:"#d2e6fa",marginTop:16}}>Click <b>Refresh broker figures</b> to see your latest balance, equity, and whether open positions are gaining or losing. This does not place trades.</p>}
   </div>
   <div className="fx-cards">
    <div className="fx-card" style={{borderTop:"4px solid #10b981"}}><small>DATA CONNECTION</small><strong>{statusLoading?"…":status?.feed_configured?"Online":"Check"}</strong><small>TickerAll integration</small></div>
