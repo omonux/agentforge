@@ -59,3 +59,38 @@ def test_position_response_whitelist_and_numeric_safety():
     assert rows[0]["profit"] is None
     assert rows[0]["magic"] == 42
     assert "secret" not in str(rows)
+
+
+@pytest.mark.parametrize("entry_key", ["openPrice", "priceOpen", "price_open", "entryPrice", "price"])
+def test_entry_price_aliases(entry_key):
+    row = forex._normalize_demo_positions([{"symbol": "EURUSD", entry_key: "1.12345"}])[0]
+    assert row["open_price"] == 1.12345
+
+
+@pytest.mark.parametrize("sl_key,tp_key", [
+    ("stopLoss", "takeProfit"), ("sl", "tp"), ("stop_loss", "take_profit"),
+    ("stopLossPrice", "takeProfitPrice")
+])
+def test_broker_stop_aliases(sl_key, tp_key):
+    row = forex._normalize_demo_positions([{sl_key: "1.09", tp_key: "1.13"}])[0]
+    assert row["stop_loss_status"] == "set"
+    assert row["take_profit_status"] == "set"
+    assert row["stop_loss"] == 1.09
+
+
+def test_unknown_stop_is_not_claimed_unprotected():
+    row = forex._normalize_demo_positions([{"symbol": "EURUSD"}])[0]
+    assert row["stop_loss_status"] == "unknown"
+    assert row["stop_loss"] is None
+
+
+def test_explicit_zero_stop_is_not_set():
+    row = forex._normalize_demo_positions([{"sl": 0, "tp": "0"}])[0]
+    assert row["stop_loss_status"] == "not_set"
+    assert row["take_profit_status"] == "not_set"
+
+
+def test_malformed_stop_is_unknown():
+    row = forex._normalize_demo_positions([{"sl": "invalid", "tp": -1}])[0]
+    assert row["stop_loss_status"] == "unknown"
+    assert row["take_profit_status"] == "unknown"
