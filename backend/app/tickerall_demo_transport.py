@@ -32,7 +32,7 @@ def _id(account_id: str) -> str:
     return account_id
 
 async def _request(method: str, path: str, *, payload: dict | None = None,
-                   idempotency_key: str | None = None) -> dict[str, Any]:
+                   idempotency_key: str | None = None) -> dict[str, Any] | list[Any]:
     async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
         response = await client.request(method, BASE + path, json=payload,
                                         headers=_headers(idempotency_key))
@@ -42,12 +42,14 @@ async def _request(method: str, path: str, *, payload: dict | None = None,
     if "application/json" not in response.headers.get("content-type", ""):
         raise BrokerUnavailable("TickerAll returned non-JSON data")
     data = response.json()
-    if not isinstance(data, dict):
+    if not isinstance(data, (dict, list)):
         raise BrokerUnavailable("TickerAll returned unexpected response")
     return data
 
 async def get_demo_account(account_id: str) -> dict[str, Any]:
     data = await _request("GET", f"/v1/accounts/{_id(account_id)}")
+    if not isinstance(data, dict):
+        raise BrokerUnavailable("Broker account response must be an object")
     account = data.get("account")
     if not isinstance(account, dict):
         raise BrokerUnavailable("Missing broker account details")
@@ -113,7 +115,7 @@ async def close_demo_position_verified(account_id: str, *, ticket: str, idempote
             or str(account.get("status", "")).lower() != "online"):
         raise BrokerUnavailable("MT5 demo identity or hot session unverified")
     before = await _request("GET", f"/v1/accounts/{account_id}/positions")
-    rows = before.get("positions")
+    rows = before if isinstance(before, list) else before.get("positions")
     if not isinstance(rows,list):
         raise BrokerUnavailable("Position roster unavailable")
     matching = [p for p in rows if isinstance(p,dict) and str(p.get("ticket")) == str(ticket)]
@@ -121,10 +123,10 @@ async def close_demo_position_verified(account_id: str, *, ticket: str, idempote
         raise BrokerUnavailable("Ticket is not uniquely open; inspect broker before retrying")
     result = await _request("DELETE", f"/v1/accounts/{account_id}/positions/{ticket}",
                             idempotency_key=idempotency_key)
-    if result.get("closed") is not True or str(result.get("ticket")) != str(ticket):
+    if not isinstance(result, dict) or result.get("closed") is not True or str(result.get("ticket")) != str(ticket):
         raise BrokerUnavailable("Broker close response unconfirmed; inspect MT5")
     after = await _request("GET", f"/v1/accounts/{account_id}/positions")
-    current = after.get("positions")
+    current = after if isinstance(after, list) else after.get("positions")
     if not isinstance(current,list) or any(isinstance(p,dict) and str(p.get("ticket")) == str(ticket) for p in current):
         raise BrokerUnavailable("Close submitted but ticket remains or broker snapshot invalid; inspect MT5")
     return {"ticket":str(ticket),"confirmed_closed":True,"mode":"demo",
