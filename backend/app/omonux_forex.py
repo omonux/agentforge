@@ -691,6 +691,13 @@ async def mt5_demo_emergency_stop():
             "status": "HALTED", "message": "MT5 demo order reservations halted. Existing broker positions were not modified."}
 
 
+@router.get("/auto-trade/research-scheduler")
+async def mt5_research_scheduler_status():
+    """Owner-only status; no broker execution or scheduler activation."""
+    from .forex_research_scheduler import snapshot
+    return snapshot()
+
+
 @router.get("/auto-trade/readiness")
 async def mt5_auto_trade_readiness():
     """Read-only, fail-closed status for the Forex dashboard.
