@@ -5,6 +5,7 @@ type Account={id:string;broker?:string;server?:string;is_demo?:boolean;status?:s
 export default function OmonuxForex(){
  const [status,setStatus]=useState<Status|null>(null);
  const [autoTradeReadiness,setAutoTradeReadiness]=useState<any>(null);
+ const [forexScheduler,setForexScheduler]=useState<any>(null);
  const [autoTradeError,setAutoTradeError]=useState("");
  const [emergencyStopBusy,setEmergencyStopBusy]=useState(false);
  const [emergencyStopMessage,setEmergencyStopMessage]=useState("");
@@ -140,7 +141,7 @@ export default function OmonuxForex(){
   finally{setMacroLoading(false)}
  }
  async function refreshAutoTradeReadiness(){
-  try{setAutoTradeReadiness(await requestJson("/api/v1/trading/forex/auto-trade/readiness"));setAutoTradeError("")}
+  try{setAutoTradeReadiness(await requestJson("/api/v1/trading/forex/auto-trade/readiness"));setForexScheduler(await requestJson("/api/v1/trading/forex/auto-trade/research-scheduler"));setAutoTradeError("")}
   catch(e){setAutoTradeReadiness(null);setAutoTradeError(e instanceof Error?e.message:"Auto-trade readiness unavailable")}
  }
  async function engageEmergencyStop(){
@@ -226,6 +227,12 @@ export default function OmonuxForex(){
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>NEON ORDER JOURNAL</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.durable_journal_ready?"Connected":"Unverified"}</div></div>
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>UNRESOLVED DEMO ORDERS</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.unresolved_order_count??"Unverified"}</div></div>
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>PERSISTED EMERGENCY STOP</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.emergency_stop_record_exists?(autoTradeReadiness?.emergency_stop_active?"Engaged":"Not engaged"):"Default fail-closed"}</div></div>
+    </div>
+    <div style={{border:"1px solid #355078",borderRadius:10,padding:12,marginBottom:14,color:"#d6e9ff"}}>
+      <strong>Forex M30 research scheduler: {forexScheduler?.enabled?"ENABLED (research only)":"DISABLED"}</strong>
+      <p style={{margin:"6px 0",fontSize:13}}>Last scan: {forexScheduler?.last_cycle_at||"Not run"} · Broker orders: NONE</p>
+      <p style={{margin:"6px 0",fontSize:13}}>Pairs: EURUSD, GBPUSD, USDJPY. Research signals do not authorize trading.</p>
+      {forexScheduler?.last_results&&<div style={{fontSize:12}}>{Object.entries(forexScheduler.last_results).map(([pair,data])=><p key={pair} style={{margin:"3px 0"}}>{pair}: {(data as any).result||"Unverified"}</p>)}</div>}
     </div>
     <p style={{color:"#fbd38d",fontSize:13,lineHeight:1.6,margin:"0 0 12px"}}>Automatic broker trading remains disabled until protected-order execution, persistent risk limits and reconciliation are verified. The paper BUY/SELL buttons are simulations.</p>
     {autoTradeReadiness?.blockers?.length>0&&<div style={{borderTop:"1px solid #355078",paddingTop:12}}>
