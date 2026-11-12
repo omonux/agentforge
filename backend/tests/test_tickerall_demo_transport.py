@@ -51,7 +51,7 @@ def test_even_enabled_transport_never_submits_unprotected_order(monkeypatch):
     async def forbidden(*args, **kwargs):
         raise AssertionError("Broker network request must not happen")
     monkeypatch.setattr(broker, "_request", forbidden)
-    with pytest.raises(broker.BrokerUnavailable, match="stop loss"):
+    with pytest.raises(ValueError, match="stop loss"):
         asyncio.run(broker.submit_demo_market_order(
             "cmwb1b0fi0kaio9012c9azw6n", symbol="EURUSD", side="BUY",
             volume=0.01, idempotency_key=str(uuid.uuid4())))
