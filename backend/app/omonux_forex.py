@@ -773,6 +773,13 @@ async def mt5_auto_trade_readiness():
             journal_ready = True
         except (DurableJournalUnavailable, ValueError):
             pass
+    daily_baseline = None
+    if journal_ready:
+        try:
+            daily_baseline = journal.daily_equity_baseline(
+                account_id, datetime.now(timezone.utc).date())
+        except (DurableJournalUnavailable, ValueError):
+            journal_ready = False
     halted = snapshot["emergency_stop_active"] if snapshot else True
     return {
         "mode": "mt5_demo",
@@ -781,12 +788,13 @@ async def mt5_auto_trade_readiness():
         "emergency_stop_active": halted,
         "durable_journal_ready": journal_ready,
         "journal_safety": snapshot,
+        "daily_risk_baseline": daily_baseline,
         "manual_approval_required": True,
         "status": "BLOCKED",
         "blockers": [
             "Automatic broker order scheduler is not connected",
             "Broker permissions and protected order acceptance are not verified",
-            "Persistent daily loss baseline and reconciliation are not verified",
+            "Daily equity baseline not broker-verified" if daily_baseline is None else "Daily equity baseline stored; live drawdown and reconciliation not verified",
         ] + ([] if journal_ready else ["Neon order journal unavailable or not initialized"]) + (["Unreconciled MT5 demo order reservations require review"] if snapshot and snapshot["unresolved_order_count"] else []),
         "message": "MT5 auto trading is OFF. No broker orders will be submitted by this control.",
     }
