@@ -6,6 +6,7 @@ export default function OmonuxForex(){
  const [status,setStatus]=useState<Status|null>(null);
  const [autoTradeReadiness,setAutoTradeReadiness]=useState<any>(null);
  const [forexScheduler,setForexScheduler]=useState<any>(null);
+ const [brokerVerification,setBrokerVerification]=useState<any>(null);
  const [autoTradeError,setAutoTradeError]=useState("");
  const [emergencyStopBusy,setEmergencyStopBusy]=useState(false);
  const [emergencyStopMessage,setEmergencyStopMessage]=useState("");
@@ -141,7 +142,7 @@ export default function OmonuxForex(){
   finally{setMacroLoading(false)}
  }
  async function refreshAutoTradeReadiness(){
-  try{setAutoTradeReadiness(await requestJson("/api/v1/trading/forex/auto-trade/readiness"));setForexScheduler(await requestJson("/api/v1/trading/forex/auto-trade/research-scheduler"));setAutoTradeError("")}
+  try{setBrokerVerification(await requestJson("/api/v1/trading/forex/auto-trade/broker-verification").catch(()=>null));setAutoTradeReadiness(await requestJson("/api/v1/trading/forex/auto-trade/readiness"));setForexScheduler(await requestJson("/api/v1/trading/forex/auto-trade/research-scheduler"));setAutoTradeError("")}
   catch(e){setAutoTradeReadiness(null);setAutoTradeError(e instanceof Error?e.message:"Auto-trade readiness unavailable")}
  }
  async function engageEmergencyStop(){
@@ -228,6 +229,12 @@ export default function OmonuxForex(){
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>NEON ORDER JOURNAL</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.durable_journal_ready?"Connected":"Unverified"}</div></div>
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>UNRESOLVED DEMO ORDERS</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.unresolved_order_count??"Unverified"}</div></div>
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>PERSISTED EMERGENCY STOP</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.emergency_stop_record_exists?(autoTradeReadiness?.emergency_stop_active?"Engaged":"Not engaged"):"Default fail-closed"}</div></div>
+    </div>
+    <div style={{border:"1px solid #355078",borderRadius:10,padding:12,marginBottom:14,color:"#d6e9ff"}}>
+      <strong>MT5 demo broker verification (read-only)</strong>
+      <p style={{fontSize:13,margin:"6px 0"}}>Demo account: {brokerVerification?.demo_account_verified?"Verified":"Unverified"} · Hot MT5 session: {brokerVerification?.session_ready?"Ready":"Unverified"}</p>
+      <p style={{fontSize:13,margin:"6px 0"}}>Positions: {brokerVerification?.positions_verified?brokerVerification.open_position_count:"Unverified"} · Symbol roster: {brokerVerification?.symbol_roster_verified?"Verified":"Unverified"}</p>
+      <p style={{fontSize:13,margin:"6px 0"}}>Protected order acceptance, stop-loss and take-profit read-back: NOT TESTED. No broker order was submitted.</p>
     </div>
     <div style={{border:"1px solid #355078",borderRadius:10,padding:12,marginBottom:14,color:"#d6e9ff"}}>
       <strong>Forex M30 research scheduler: {forexScheduler?.enabled?"ENABLED (research only)":"DISABLED"}</strong>
