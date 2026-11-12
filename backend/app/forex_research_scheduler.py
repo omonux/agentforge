@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 PAIRS = ("EURUSD", "GBPUSD", "USDJPY")
 STATUS = {"enabled": False, "running": False, "last_cycle_at": None,
-          "last_results": {}, "last_error": None, "execution": "research_only_no_orders"}
+          "last_results": {}, "last_error": None, "last_started_at": None, "execution": "research_only_no_orders"}
 
 def snapshot():
     return {**STATUS, "last_results": dict(STATUS["last_results"])}
@@ -20,10 +20,12 @@ async def run_cycle():
     if STATUS["running"]:
         return
     STATUS["running"] = True
+    STATUS["last_started_at"] = datetime.now(timezone.utc).isoformat()
     try:
         for pair in PAIRS:
+            STATUS["last_results"][pair] = {"result": "scanning", "execution": "no_order_placed"}
             try:
-                result = await forex_research(pair, timeframe="M30", hours=168)
+                result = await asyncio.wait_for(forex_research(pair, timeframe="M30", hours=168), timeout=90)
                 STATUS["last_results"][pair] = {
                     "checked_at": datetime.now(timezone.utc).isoformat(),
                     "result": "research_completed",
@@ -42,6 +44,7 @@ async def run_cycle():
         STATUS["last_cycle_at"] = datetime.now(timezone.utc).isoformat()
         STATUS["last_error"] = None
     finally:
+        STATUS["last_cycle_at"] = datetime.now(timezone.utc).isoformat()
         STATUS["running"] = False
 
 async def research_scheduler():
