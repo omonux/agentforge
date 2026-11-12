@@ -917,3 +917,58 @@ async def mt5_auto_trade_readiness():
         ] + ([] if journal_ready else ["Neon order journal unavailable or not initialized"]) + (["Unreconciled MT5 demo order reservations require review"] if snapshot and snapshot["unresolved_order_count"] else []),
         "message": "MT5 auto trading is OFF. No broker orders will be submitted by this control.",
     }
+
+
+@router.get("/auto-trade/execution-preflight")
+async def mt5_demo_execution_preflight(symbol: str = "EURUSDm"):
+    """Read-only MT5 broker evidence; cannot unlock trading or submit orders."""
+    from .tickerall_demo_transport import _request, get_demo_account, BrokerUnavailable
+    from .forex_execution_evidence import symbol_evidence, quote_evidence
+    allowed = {"EURUSDm", "GBPUSDm", "USDJPYm"}
+    if symbol not in allowed:
+        raise HTTPException(422, "Unsupported Exness demo symbol")
+    result = {"mode": "DEMO_ONLY", "read_only": True, "order_submitted": False,
+              "execution_authorized": False, "auto_trade_enabled": False,
+              "symbol": symbol, "demo_verified": False, "session_ready": False,
+              "specifications": {}, "specifications_verified": False,
+              "quote": {}, "quote_verified": False,
+              "trading_permissions_verified": False, "blockers": []}
+    try:
+        account_id = _account_id()
+        account = await get_demo_account(account_id)
+        roster = await _request("GET", "/v1/accounts")
+        row = next((r for r in roster if isinstance(r, dict) and r.get("id") == account_id), None) if isinstance(roster, list) else None
+        result["demo_verified"] = bool(row and row.get("isDemo") is True and
+                                       str(row.get("broker", "")).lower() == "mt5")
+        result["session_ready"] = bool(result["demo_verified"] and row.get("hot") is True and
+                                        str(row.get("status", "")).lower() in ("online", "connected") and
+                                        str(account.get("status", "")).lower() == "online")
+        if result["session_ready"]:
+            symbols = await _request("GET", f"/v1/accounts/{account_id}/symbols")
+            result["specifications"] = symbol_evidence(symbols, symbol)
+            result["specifications_verified"] = bool(result["specifications"] and all(
+                result["specifications"].get(k) is not None for k in (
+                    "min_volume", "max_volume", "volume_step", "contract_size",
+                    "tick_size", "tick_value", "stops_level")))
+            # Provider quote route must be independently confirmed; unsupported
+            # endpoints fail closed and are reported rather than guessed valid.
+            try:
+                quote_payload = await _request("GET", f"/v1/accounts/{account_id}/symbols/{symbol}/quote")
+                result["quote"] = quote_evidence(quote_payload, symbol)
+                result["quote_verified"] = bool(result["quote"])
+            except (BrokerUnavailable, httpx.HTTPError, ValueError, TypeError):
+                pass
+            # Read-only metadata is not proof that a protected order can execute.
+            result["trading_permissions_verified"] = False
+    except (BrokerUnavailable, httpx.HTTPError, ValueError, TypeError, AttributeError):
+        result["blockers"].append("Demo broker evidence unavailable")
+    for field, reason in (
+        ("demo_verified", "Demo account identity not verified"),
+        ("session_ready", "Hot broker session not verified"),
+        ("specifications_verified", "Complete broker lot, contract and stop specifications unavailable"),
+        ("quote_verified", "Fresh timestamped bid/ask quote unavailable or provider route unsupported"),
+        ("trading_permissions_verified", "Broker order permissions and protected execution not verified"),
+    ):
+        if not result[field]:
+            result["blockers"].append(reason)
+    return result
