@@ -334,6 +334,62 @@ async def protect_existing_demo_position(request: DemoStopUpdate):
         raise HTTPException(503,"Broker request failed or timed out. Inspect MT5 before retrying.") from exc
 
 
+@router.get("/auto-trade/broker-verification")
+async def mt5_demo_broker_verification():
+    """Read-only broker evidence. GET requests cannot prove order acceptance."""
+    from .tickerall_demo_transport import get_demo_account, _request, BrokerUnavailable
+    account_id = _account_id()
+    result = {
+        "mode": "DEMO_ONLY", "read_only": True, "order_submitted": False,
+        "demo_account_verified": False, "mt5_broker_verified": False,
+        "session_ready": False, "positions_verified": False,
+        "open_position_count": None, "symbol_roster_verified": False,
+        "broker_permissions_verified": False, "protected_order_acceptance_verified": False,
+        "stop_loss_readback_verified": False, "take_profit_readback_verified": False,
+        "execution_enabled": False, "blockers": [],
+    }
+    try:
+        account = await get_demo_account(account_id)
+        roster = await _request("GET", "/v1/accounts")
+        if not isinstance(roster, list):
+            raise BrokerUnavailable("Account roster unavailable")
+        row = next((r for r in roster if isinstance(r, dict) and r.get("id") == account_id), None)
+        if not row or row.get("isDemo") is not True:
+            raise BrokerUnavailable("Roster did not verify demo account")
+        result["demo_account_verified"] = True
+        result["mt5_broker_verified"] = (
+            str(row.get("broker", "")).lower() == "mt5"
+            and str(account.get("broker", "")).lower() == "mt5")
+        result["session_ready"] = bool(
+            result["mt5_broker_verified"] and row.get("hot") is True
+            and str(row.get("status", "")).lower() in ("online", "connected")
+            and str(account.get("status", "")).lower() == "online")
+        positions = await _request("GET", f"/v1/accounts/{account_id}/positions")
+        rows = positions if isinstance(positions, list) else positions.get("positions")
+        if not isinstance(rows, list):
+            raise BrokerUnavailable("Position snapshot unavailable")
+        result["positions_verified"] = True
+        result["open_position_count"] = len(rows)
+        symbols = await _request("GET", f"/v1/accounts/{account_id}/symbols")
+        result["symbol_roster_verified"] = isinstance(symbols, (dict, list)) and bool(symbols)
+    except (BrokerUnavailable, httpx.HTTPError, ValueError, TypeError, AttributeError):
+        result["blockers"].append("Broker read-only verification unavailable or incomplete")
+    for field, message in (
+        ("demo_account_verified", "Demo account identity unverified"),
+        ("mt5_broker_verified", "MT5 broker identity unverified"),
+        ("session_ready", "Hot online MT5 session unverified"),
+        ("positions_verified", "Open-position snapshot unverified"),
+        ("symbol_roster_verified", "Broker symbol roster unverified"),
+        ("broker_permissions_verified", "Broker order permission not verified"),
+        ("protected_order_acceptance_verified", "Protected demo order acceptance not tested"),
+        ("stop_loss_readback_verified", "Broker stop-loss read-back not tested"),
+        ("take_profit_readback_verified", "Broker take-profit read-back not tested"),
+    ):
+        if not result[field]:
+            result["blockers"].append(message)
+    return result
+
+
 @router.get("/preflight/session")
 async def forex_session_preflight():
     """Read-only broker session verification. Never authorizes execution."""
