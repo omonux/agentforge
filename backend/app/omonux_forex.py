@@ -403,6 +403,51 @@ async def mt5_demo_risk_evidence():
     return evidence
 
 
+@router.get("/auto-trade/reconciliation-audit")
+async def mt5_demo_reconciliation_audit():
+    """Read-only journal-to-broker audit. NEVER marks an uncertain order resolved.
+
+    Position count alone cannot prove whether a broker accepted an order.
+    """
+    from .tickerall_demo_transport import get_demo_account, _request, BrokerUnavailable
+    from .forex_neon_journal import NeonDemoJournal, DurableJournalUnavailable
+    account_id = _account_id()
+    result = {"mode": "DEMO_ONLY", "read_only": True, "order_submitted": False,
+              "journal_available": False, "broker_verified": False,
+              "unresolved_orders": [], "broker_position_count": None,
+              "reconciled": False, "execution_authorized": False, "blockers": []}
+    try:
+        journal = NeonDemoJournal()
+        result["unresolved_orders"] = journal.unresolved_orders(account_id)
+        result["journal_available"] = True
+    except (DurableJournalUnavailable, ValueError):
+        result["blockers"].append("Neon order journal unavailable")
+    try:
+        account = await get_demo_account(account_id)
+        roster = await _request("GET", "/v1/accounts")
+        row = next((x for x in roster if isinstance(x, dict) and x.get("id") == account_id), None) if isinstance(roster, list) else None
+        if not (row and row.get("isDemo") is True
+                and str(row.get("broker", "")).lower() == "mt5"
+                and str(account.get("broker", "")).lower() == "mt5"):
+            raise BrokerUnavailable("Demo broker identity unverified")
+        positions = await _request("GET", f"/v1/accounts/{account_id}/positions")
+        rows = positions if isinstance(positions, list) else positions.get("positions")
+        if not isinstance(rows, list):
+            raise BrokerUnavailable("Position snapshot unavailable")
+        result["broker_verified"] = True
+        result["broker_position_count"] = len(rows)
+    except (BrokerUnavailable, httpx.HTTPError, ValueError, TypeError, AttributeError):
+        result["blockers"].append("Broker positions unavailable or demo identity unverified")
+    if result["unresolved_orders"]:
+        result["blockers"].append("Unresolved reservations require ticket/deal-history correlation before clearing")
+    if result["broker_position_count"]:
+        result["blockers"].append("Open positions require broker protection and origin verification")
+    if result["journal_available"] and result["broker_verified"] and not result["unresolved_orders"] and result["broker_position_count"] == 0:
+        result["reconciled"] = True
+    result["note"] = "Flat account with no pending journal records is a clean snapshot, not proof that an earlier uncertain order never executed."
+    return result
+
+
 @router.get("/auto-trade/broker-verification")
 async def mt5_demo_broker_verification():
     """Read-only broker evidence. GET requests cannot prove order acceptance."""
