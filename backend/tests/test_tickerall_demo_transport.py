@@ -55,3 +55,55 @@ def test_even_enabled_transport_never_submits_unprotected_order(monkeypatch):
         asyncio.run(broker.submit_demo_market_order(
             "cmwb1b0fi0kaio9012c9azw6n", symbol="EURUSD", side="BUY",
             volume=0.01, idempotency_key=str(uuid.uuid4())))
+
+@pytest.mark.parametrize("pending", [{"orders": [{"ticket": 44}]}, {}, [], {"orders": None}])
+def test_pending_or_unverified_orders_block_entry(monkeypatch, pending):
+    requests = install_order_broker(monkeypatch, pending=pending)
+    with pytest.raises(broker.BrokerUnavailable, match="Pending orders"):
+        submit_protected_order()
+    assert not any(method == "POST" for method, path in requests)
+
+
+def install_order_broker(monkeypatch, *, pending=None, position_volume=0.01):
+    monkeypatch.setenv("TICKERALL_DEMO_EXECUTION_TRANSPORT", "enabled")
+    requests = []
+    position_reads = 0
+    async def request(method, path, **kwargs):
+        nonlocal position_reads
+        requests.append((method, path))
+        if path == "/v1/accounts/demo12345":
+            return {"isDemo": True, "broker": "mt5", "status": "online", "account": {}}
+        if path == "/v1/accounts":
+            return [{"id": "demo12345", "isDemo": True, "broker": "mt5", "hot": True, "status": "online"}]
+        if path.endswith('/positions'):
+            position_reads += 1
+            return {"positions": [] if position_reads == 1 else [{
+                "ticket": 123, "symbol": "EURUSDm", "side": "BUY",
+                "volume": position_volume, "stopLoss": 1.09, "takeProfit": 1.12}]}
+        if path.endswith('/orders') and method == 'GET':
+            return {"orders": []} if pending is None else pending
+        if path.endswith('/orders') and method == 'POST':
+            return {"status": "open", "ticket": 123}
+        raise AssertionError((method, path))
+    monkeypatch.setattr(broker, '_request', request)
+    return requests
+
+
+def submit_protected_order():
+    return asyncio.run(broker.submit_demo_market_order(
+        'demo12345', symbol='EURUSDm', side='BUY', volume=0.01,
+        stop_loss=1.09, take_profit=1.12, idempotency_key=str(uuid.uuid4())))
+
+
+@pytest.mark.parametrize('volume', [0.02, None, True, float('nan')])
+def test_unverified_fill_volume_is_not_acknowledged(monkeypatch, volume):
+    install_order_broker(monkeypatch, position_volume=volume)
+    with pytest.raises(broker.BrokerUnavailable, match='volume'):
+        submit_protected_order()
+
+
+def test_protected_order_confirms_volume_and_stops(monkeypatch):
+    requests = install_order_broker(monkeypatch)
+    result = submit_protected_order()
+    assert result['confirmed_open'] is True
+    assert sum(method == 'POST' for method, path in requests) == 1
