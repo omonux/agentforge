@@ -334,6 +334,75 @@ async def protect_existing_demo_position(request: DemoStopUpdate):
         raise HTTPException(503,"Broker request failed or timed out. Inspect MT5 before retrying.") from exc
 
 
+@router.get("/auto-trade/risk-evidence")
+async def mt5_demo_risk_evidence():
+    """Read-only broker-vs-Neon equity evidence. No order, no baseline mutation.
+
+    A first observed equity snapshot during the day is NOT a true
+    start-of-day baseline; never silently initialize one here.
+    """
+    from decimal import Decimal, InvalidOperation
+    from .tickerall_demo_transport import get_demo_account, _request, BrokerUnavailable
+    from .forex_neon_journal import NeonDemoJournal, DurableJournalUnavailable
+    account_id = _account_id()
+    evidence = {"mode": "DEMO_ONLY", "read_only": True, "order_submitted": False,
+                "account_verified": False, "equity_verified": False,
+                "broker_equity": None, "currency": None, "baseline": None,
+                "daily_drawdown_percent": None, "daily_limit_reached": None,
+                "unresolved_orders": None, "emergency_stop_active": True,
+                "execution_authorized": False, "blockers": []}
+    try:
+        account = await get_demo_account(account_id)
+        roster = await _request("GET", "/v1/accounts")
+        if not isinstance(roster, list):
+            raise BrokerUnavailable("Account roster unavailable")
+        row = next((r for r in roster if isinstance(r, dict) and r.get("id") == account_id), None)
+        if not (row and row.get("isDemo") is True
+                and str(row.get("broker", "")).lower() == "mt5"
+                and str(account.get("broker", "")).lower() == "mt5"
+                and row.get("hot") is True
+                and str(row.get("status", "")).lower() in ("online", "connected")
+                and str(account.get("status", "")).lower() == "online"):
+            raise BrokerUnavailable("MT5 demo session unverified")
+        evidence["account_verified"] = True
+        details = account.get("account")
+        if not isinstance(details, dict):
+            raise BrokerUnavailable("Broker equity details unavailable")
+        equity = Decimal(str(details.get("equity")))
+        currency = details.get("currency")
+        if not equity.is_finite() or equity <= 0 or not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha():
+            raise BrokerUnavailable("Broker equity or currency invalid")
+        evidence["broker_equity"] = str(equity)
+        evidence["currency"] = currency.upper()
+        evidence["equity_verified"] = True
+        journal = NeonDemoJournal()
+        snapshot = journal.safety_snapshot(account_id)
+        evidence["emergency_stop_active"] = snapshot["emergency_stop_active"]
+        evidence["unresolved_orders"] = snapshot["unresolved_order_count"]
+        baseline = journal.daily_equity_baseline(account_id, datetime.now(timezone.utc).date())
+        evidence["baseline"] = baseline
+        if baseline is None:
+            evidence["blockers"].append("No broker-verified start-of-day equity baseline stored")
+        elif baseline["currency"] != currency.upper():
+            evidence["blockers"].append("Broker currency differs from daily baseline")
+        else:
+            start = Decimal(baseline["start_equity"])
+            drawdown = (start - equity) / start * 100
+            evidence["daily_drawdown_percent"] = str(drawdown)
+            evidence["daily_limit_reached"] = drawdown >= Decimal("1")
+        if evidence["emergency_stop_active"]:
+            evidence["blockers"].append("Emergency stop engaged")
+        if evidence["unresolved_orders"]:
+            evidence["blockers"].append("Unresolved demo orders require reconciliation")
+        if evidence["daily_limit_reached"] is True:
+            evidence["blockers"].append("Daily loss limit reached")
+    except (BrokerUnavailable, DurableJournalUnavailable, InvalidOperation,
+            ValueError, TypeError, httpx.HTTPError):
+        evidence["blockers"].append("Broker or Neon risk evidence unavailable")
+    evidence["blockers"].append("Protected-order acceptance and execution reconciliation not yet verified")
+    return evidence
+
+
 @router.get("/auto-trade/broker-verification")
 async def mt5_demo_broker_verification():
     """Read-only broker evidence. GET requests cannot prove order acceptance."""
