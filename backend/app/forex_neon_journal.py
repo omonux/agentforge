@@ -5,6 +5,8 @@ No broker requests or autonomous execution. Fail closed when DATABASE_URL is abs
 from __future__ import annotations
 import os
 import uuid
+from decimal import Decimal, InvalidOperation
+from datetime import date
 from contextlib import contextmanager
 import psycopg
 
@@ -27,7 +29,7 @@ CREATE TABLE IF NOT EXISTS mt5_demo_orders (
  updated_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(account_id,signal_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS mt5_one_unresolved_order
+CREATE TABLE IF NOT EXISTS mt5_demo_daily_equity (\n account_id text NOT NULL, trading_day date NOT NULL,\n start_equity numeric NOT NULL CHECK (start_equity > 0),\n currency text NOT NULL, recorded_at timestamptz NOT NULL DEFAULT now(),\n PRIMARY KEY (account_id, trading_day)\n);\nCREATE UNIQUE INDEX IF NOT EXISTS mt5_one_unresolved_order
  ON mt5_demo_orders(account_id)
  WHERE status IN ('RESERVED','SUBMITTING','UNKNOWN','ACKNOWLEDGED');
 """
@@ -125,3 +127,48 @@ class NeonDemoJournal:
             "emergency_stop_updated_at": row[1].isoformat() if row else None,
             "unresolved_order_count": int(pending[0]) if pending else 0,
         }
+
+    def record_daily_equity_baseline(self, account_id: str, trading_day: date,
+                                     equity: str, currency: str) -> dict:
+        """Immutable first snapshot for UTC trading day; never overwrite baseline.
+
+        Caller MUST independently verify equity/currency against fresh DEMO
+        broker account data. This method does not fetch or infer broker data.
+        """
+        if not account_id or not isinstance(trading_day, date) or isinstance(trading_day, __import__("datetime").datetime):
+            raise ValueError("Valid account and date required")
+        if not isinstance(currency, str) or not currency.isalpha() or len(currency) != 3:
+            raise ValueError("Valid account currency required")
+        try:
+            value = Decimal(str(equity))
+        except (InvalidOperation, ValueError):
+            raise ValueError("Invalid equity") from None
+        if not value.is_finite() or value <= 0:
+            raise ValueError("Positive finite equity required")
+        with self._connection() as conn:
+            conn.execute("""INSERT INTO mt5_demo_daily_equity
+                (account_id,trading_day,start_equity,currency)
+                VALUES (%s,%s,%s,%s)
+                ON CONFLICT (account_id,trading_day) DO NOTHING""",
+                (account_id,trading_day,value,currency.upper()))
+            row = conn.execute("""SELECT start_equity,currency,recorded_at
+                FROM mt5_demo_daily_equity
+                WHERE account_id=%s AND trading_day=%s""",
+                (account_id,trading_day)).fetchone()
+        if row[1] != currency.upper():
+            raise DurableJournalUnavailable("Account currency changed; risk baseline blocked")
+        return {"trading_day":trading_day.isoformat(),"start_equity":str(row[0]),
+                "currency":row[1],"recorded_at":row[2].isoformat()}
+
+    def daily_equity_baseline(self, account_id: str, trading_day: date) -> dict | None:
+        if not account_id or not isinstance(trading_day,date):
+            raise ValueError("Valid account and date required")
+        with self._connection() as conn:
+            row = conn.execute("""SELECT start_equity,currency,recorded_at
+                FROM mt5_demo_daily_equity
+                WHERE account_id=%s AND trading_day=%s""",
+                (account_id,trading_day)).fetchone()
+        if row is None:
+            return None
+        return {"trading_day":trading_day.isoformat(),"start_equity":str(row[0]),
+                "currency":row[1],"recorded_at":row[2].isoformat()}
