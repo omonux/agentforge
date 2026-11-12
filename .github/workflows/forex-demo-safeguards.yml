@@ -6,7 +6,8 @@ on:
       - 'backend/app/omonux_forex.py'
       - 'backend/app/tickerall_demo_transport.py'
       - 'backend/tests/test_forex_demo_*.py'
-      - 'backend/tests/test_tickerall_demo_transport.py'
+      - 'backend/app/forex_demo_coordinator.py'
+      - 'backend/tests/test_tickerall_demo_transport.py tests/test_forex_demo_one_shot.py'
       - '.github/workflows/forex-demo-safeguards.yml'
   workflow_dispatch:
 jobs:
