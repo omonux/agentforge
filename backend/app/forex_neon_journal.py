@@ -106,3 +106,22 @@ class NeonDemoJournal:
               WHERE idempotency_key=%s AND status=%s""", (target,key,expected))
             if result.rowcount != 1:
                 raise DurableJournalUnavailable("Order state uncertain; reconcile first")
+
+    def safety_snapshot(self, account_id: str) -> dict:
+        """Read-only, account-scoped controls and unresolved-order counts."""
+        if not account_id:
+            raise ValueError("Account required")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT halted,updated_at FROM mt5_demo_controls WHERE account_id=%s",
+                (account_id,)).fetchone()
+            pending = conn.execute("""SELECT count(*) FROM mt5_demo_orders
+              WHERE account_id=%s AND status IN
+              ('RESERVED','SUBMITTING','UNKNOWN','ACKNOWLEDGED')""",
+              (account_id,)).fetchone()
+        return {
+            "emergency_stop_active": row is None or row[0] is not False,
+            "emergency_stop_record_exists": row is not None,
+            "emergency_stop_updated_at": row[1].isoformat() if row else None,
+            "unresolved_order_count": int(pending[0]) if pending else 0,
+        }

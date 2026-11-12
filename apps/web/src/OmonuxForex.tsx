@@ -222,6 +222,11 @@ export default function OmonuxForex(){
         <button className="secondary" onClick={()=>void refreshAutoTradeReadiness()} style={{whiteSpace:"normal",minHeight:42}}>Refresh readiness</button>
       </div>
     </div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:14}}>
+      <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>NEON ORDER JOURNAL</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.durable_journal_ready?"Connected":"Unverified"}</div></div>
+      <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>UNRESOLVED DEMO ORDERS</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.unresolved_order_count??"Unverified"}</div></div>
+      <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>PERSISTED EMERGENCY STOP</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.emergency_stop_record_exists?(autoTradeReadiness?.emergency_stop_active?"Engaged":"Not engaged"):"Default fail-closed"}</div></div>
+    </div>
     <p style={{color:"#fbd38d",fontSize:13,lineHeight:1.6,margin:"0 0 12px"}}>Automatic broker trading remains disabled until protected-order execution, persistent risk limits and reconciliation are verified. The paper BUY/SELL buttons are simulations.</p>
     {autoTradeReadiness?.blockers?.length>0&&<div style={{borderTop:"1px solid #355078",paddingTop:12}}>
       <strong style={{color:"#e2eaff",fontSize:13}}>What must be fixed before enabling:</strong>
