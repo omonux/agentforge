@@ -106,6 +106,10 @@ async def submit_demo_market_order(account_id: str, *, symbol: str,
     positions = before if isinstance(before, list) else before.get("positions")
     if not isinstance(positions, list) or len(positions) != 0:
         raise BrokerUnavailable("Account must be flat and position roster verified before entry")
+    pending = await _request("GET", f"/v1/accounts/{account_id}/orders")
+    orders = pending.get("orders") if isinstance(pending, dict) else None
+    if not isinstance(orders, list) or orders:
+        raise BrokerUnavailable("Pending orders must be verified empty before entry")
     payload = {"type": "market", "symbol": symbol, "side": side,
                "volume": volume, "stopLoss": stop_loss,
                "takeProfit": take_profit, "comment": "AgentForge-demo"}
@@ -138,9 +142,10 @@ async def submit_demo_market_order(account_id: str, *, symbol: str,
     if broker_side in (0, 1):
         broker_side = {0: "BUY", 1: "SELL"}[broker_side]
     if (p.get("symbol") != symbol or str(broker_side).upper() != side or
+            not same_price(p.get("volume"), volume) or
             not same_price(p.get("stopLoss", p.get("sl")), stop_loss) or
             not same_price(p.get("takeProfit", p.get("tp")), take_profit)):
-        raise BrokerUnavailable("Position exists but protective levels not confirmed; inspect MT5 immediately")
+        raise BrokerUnavailable("Position exists but volume or protective levels not confirmed; inspect MT5 immediately")
     return {"ticket": ticket, "confirmed_open": True, "mode": "demo",
             "stop_loss": stop_loss, "take_profit": take_profit}
 

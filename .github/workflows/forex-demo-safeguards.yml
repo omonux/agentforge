@@ -7,7 +7,9 @@ on:
       - 'backend/app/tickerall_demo_transport.py'
       - 'backend/tests/test_forex_demo_*.py'
       - 'backend/app/forex_demo_coordinator.py'
-      - 'backend/tests/test_tickerall_demo_transport.py tests/test_forex_demo_one_shot.py'
+      - 'backend/tests/test_tickerall_demo_transport.py'
+      - 'backend/app/forex_neon_journal.py'
+      - 'backend/requirements.txt'
       - '.github/workflows/forex-demo-safeguards.yml'
   workflow_dispatch:
 jobs:
@@ -22,6 +24,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install pytest
-        run: python -m pip install pytest httpx fastapi pydantic
+        run: python -m pip install -r requirements.txt pytest
       - name: Run offline safeguard tests
-        run: python -m pytest -q tests/test_forex_demo_risk.py tests/test_forex_demo_journal.py tests/test_forex_demo_preflight.py tests/test_forex_demo_positions.py tests/test_tickerall_demo_transport.py
+        run: python -m pytest -q tests/test_forex_demo_risk.py tests/test_forex_demo_journal.py tests/test_forex_demo_preflight.py tests/test_forex_demo_positions.py tests/test_tickerall_demo_transport.py tests/test_forex_demo_coordinator.py tests/test_forex_demo_one_shot.py
