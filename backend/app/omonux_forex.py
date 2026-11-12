@@ -423,8 +423,13 @@ async def forex_candles(symbol: str, timeframe: str = "M30", hours: int = 72):
         account = await _tickerall_get("/v1/accounts/" + _account_id())
         if not isinstance(account, dict) or account.get("isDemo") is not True:
             raise ValueError("Demo-only Forex connection required")
+        # Resolve the broker's exact tradable symbol. Exness Standard demo
+        # uses the 'm' suffix; never silently substitute another instrument.
+        broker_symbol = market
+        if str(account.get("server", "")).startswith("Exness-MT5Trial"):
+            broker_symbol = market + "m"
         payload = await _tickerall_get("/v1/accounts/" + _account_id() + "/candles",
-                                       {"symbol": market, "timeframe": timeframe, "hours": hours})
+                                       {"symbol": broker_symbol, "timeframe": timeframe, "hours": hours})
         if not isinstance(payload, dict) or not isinstance(payload.get("candles"), list):
             raise ValueError("TickerAll candle response invalid")
         if payload.get("truncated") or payload.get("coverage") != "complete":
@@ -440,7 +445,7 @@ async def forex_candles(symbol: str, timeframe: str = "M30", hours: int = 72):
                   b["timestamp"] + seconds <= now]
         if len(closed) < 30 or now - (closed[-1]["timestamp"] + seconds) > 2 * seconds:
             raise ValueError("Forex closed candles stale or insufficient")
-        return {"symbol": market, "timeframe": timeframe,
+        return {"symbol": market, "broker_symbol": broker_symbol, "timeframe": timeframe,
                 "candles": closed[-120:], "count": len(closed[-120:]),
                 "source": "TickerAll MT5 demo account",
                 "execution": "research_only_no_order_placed"}
