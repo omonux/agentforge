@@ -29,7 +29,13 @@ CREATE TABLE IF NOT EXISTS mt5_demo_orders (
  updated_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(account_id,signal_id)
 );
-CREATE TABLE IF NOT EXISTS mt5_demo_daily_equity (\n account_id text NOT NULL, trading_day date NOT NULL,\n start_equity numeric NOT NULL CHECK (start_equity > 0),\n currency text NOT NULL, recorded_at timestamptz NOT NULL DEFAULT now(),\n PRIMARY KEY (account_id, trading_day)\n);\nCREATE UNIQUE INDEX IF NOT EXISTS mt5_one_unresolved_order
+CREATE TABLE IF NOT EXISTS mt5_demo_daily_equity (
+ account_id text NOT NULL, trading_day date NOT NULL,
+ start_equity numeric NOT NULL CHECK (start_equity > 0),
+ currency text NOT NULL, recorded_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY (account_id, trading_day)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS mt5_one_unresolved_order
  ON mt5_demo_orders(account_id)
  WHERE status IN ('RESERVED','SUBMITTING','UNKNOWN','ACKNOWLEDGED');
 """
@@ -172,3 +178,16 @@ class NeonDemoJournal:
             return None
         return {"trading_day":trading_day.isoformat(),"start_equity":str(row[0]),
                 "currency":row[1],"recorded_at":row[2].isoformat()}
+
+    def unresolved_orders(self, account_id: str) -> list[dict]:
+        """Read-only pending journal records; never resolve from an empty snapshot."""
+        if not account_id:
+            raise ValueError("Account required")
+        with self._connection() as conn:
+            rows = conn.execute("""SELECT idempotency_key,signal_id,status,created_at,updated_at
+                FROM mt5_demo_orders WHERE account_id=%s
+                AND status IN ('RESERVED','SUBMITTING','UNKNOWN','ACKNOWLEDGED')
+                ORDER BY created_at LIMIT 100""", (account_id,)).fetchall()
+        return [{"idempotency_key":str(r[0]),"signal_id":r[1],
+                 "status":r[2],"created_at":r[3].isoformat(),
+                 "updated_at":r[4].isoformat()} for r in rows]
