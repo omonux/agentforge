@@ -703,8 +703,8 @@ def auto_trading_risk_preview(request: AutoTradeRiskRequest):
         reasons.append("Spread too wide")
     if request.quote_age_seconds > MAX_QUOTE_AGE_SECONDS:
         reasons.append("Quote stale")
-    if request.equity <= request.day_start_equity * 0.98:
-        reasons.append("Daily drawdown limit of 2% reached")
+    if request.equity <= request.day_start_equity * 0.99:
+        reasons.append("Daily drawdown limit of 1% reached")
     if request.open_positions >= 1:
         reasons.append("Existing position: no overlapping entries")
     if request.trades_today >= 3:
@@ -719,7 +719,7 @@ def auto_trading_risk_preview(request: AutoTradeRiskRequest):
         reasons.append("High-impact news safety window not cleared")
     return {"mode":"risk_preview_only","candidate_passes_policy":not reasons,
             "broker_execution_authorized":False,"order_submitted":False,
-            "risk_per_trade_percent_max":0.25,"daily_drawdown_percent_max":2,
+            "risk_per_trade_percent_max":0.25,"daily_drawdown_percent_max":1,
             "max_open_positions":1,"max_trades_per_day":3,
             "rejection_reasons":reasons,
             "warning":"A passing candidate does not enable execution. Broker order contract, server-side authenticated scheduler, durable risk ledger and reconciliation remain mandatory."}
