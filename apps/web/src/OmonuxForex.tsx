@@ -196,14 +196,25 @@ export default function OmonuxForex(){
      </div><p style={{fontSize:12,color:"#b7cce6",marginTop:14}}>Last checked: {accountCheckedAt||"—"} · Snapshot on demand, not a streaming feed. Demo funds only. Broker data may be delayed.</p></>
    })():<p style={{color:"#d2e6fa",marginTop:16}}>Click <b>Refresh broker figures</b> to see your latest balance, equity, and whether open positions are gaining or losing. This does not place trades.</p>}
   </div>
-  <div className="taskrow" style={{border:"2px solid #6885b5",padding:24}} aria-label="MT5 automatic trading controls">
-   <h3 style={{color:"white",marginTop:0}}>MT5 Auto Trade · Demo</h3>
-   <p style={{color:"#d6e9ff"}}>Broker execution status: <b>{autoTradeReadiness?.status||"UNVERIFIED"}</b> · Auto trading: <b>OFF</b> · Emergency stop: <b>{autoTradeReadiness?.emergency_stop_active===false?"Not engaged":"ACTIVE / UNVERIFIED"}</b></p>
-   <div className="actions"><button disabled aria-disabled="true" title="Broker execution safeguards are not verified">Auto Trade OFF · Locked</button><button className="secondary" onClick={()=>void refreshAutoTradeReadiness()}>Refresh auto-trade readiness</button></div>
-   <small style={{display:"block",color:"#fbd38d",marginTop:12}}>This control cannot place orders until the server verifies protected broker execution, persistent risk limits and reconciliation. The paper BUY/SELL buttons below remain simulations.</small>
-   {autoTradeReadiness?.blockers?.length>0&&<ul style={{color:"#d6e9ff"}}>{autoTradeReadiness.blockers.map((item:string)=><li key={item}>{item}</li>)}</ul>}
-   {autoTradeError&&<p role="alert" style={{color:"#fca5a5"}}>{autoTradeError}</p>}
-  </div>
+  <section aria-label="MT5 automatic trading controls" style={{border:"1px solid #496b9e",borderRadius:18,padding:"clamp(16px, 2vw, 24px)",background:"#142645",marginBottom:16}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:16}}>
+      <div style={{minWidth:220,flex:"1 1 260px"}}>
+        <h3 style={{color:"#f5f9ff",fontSize:20,margin:"0 0 8px"}}>MT5 Auto Trade <span style={{fontSize:12,color:"#9fd5ff"}}>DEMO ONLY</span></h3>
+        <p style={{color:"#c6d9f1",margin:0,lineHeight:1.6}}>Execution: <strong>{autoTradeReadiness?.status||"UNVERIFIED"}</strong> · Auto Trade: <strong>OFF</strong></p>
+        <p style={{color:"#c6d9f1",margin:"4px 0 0",lineHeight:1.6}}>Emergency stop: <strong>{autoTradeReadiness?.emergency_stop_active===false?"Not engaged":"ACTIVE / UNVERIFIED"}</strong></p>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
+        <button disabled aria-disabled="true" title="Broker execution safeguards are not verified" style={{whiteSpace:"normal",minHeight:42}}>Auto Trade OFF · Locked</button>
+        <button className="secondary" onClick={()=>void refreshAutoTradeReadiness()} style={{whiteSpace:"normal",minHeight:42}}>Refresh readiness</button>
+      </div>
+    </div>
+    <p style={{color:"#fbd38d",fontSize:13,lineHeight:1.6,margin:"0 0 12px"}}>Automatic broker trading remains disabled until protected-order execution, persistent risk limits and reconciliation are verified. The paper BUY/SELL buttons are simulations.</p>
+    {autoTradeReadiness?.blockers?.length>0&&<div style={{borderTop:"1px solid #355078",paddingTop:12}}>
+      <strong style={{color:"#e2eaff",fontSize:13}}>What must be fixed before enabling:</strong>
+      <ul style={{color:"#d6e9ff",lineHeight:1.7,margin:"8px 0 0",paddingLeft:22,overflowWrap:"anywhere"}}>{autoTradeReadiness.blockers.map((item:string)=><li key={item}>{item}</li>)}</ul>
+    </div>}
+    {autoTradeError&&<p role="alert" style={{color:"#fca5a5",overflowWrap:"anywhere"}}>{autoTradeError}</p>}
+  </section>
   <div className="fx-cards">
    <div className="fx-card" style={{borderTop:"4px solid #10b981"}}><small>DATA CONNECTION</small><strong>{statusLoading?"…":status?.feed_configured?"Online":"Check"}</strong><small>TickerAll integration</small></div>
    <div className="fx-card" style={{borderTop:"4px solid #8b5cf6"}}><small>OPEN MT5 POSITIONS</small><strong>{positions?.count??"—"}</strong><small>{positions?"Broker snapshot loaded":"Load broker positions"}</small></div>
