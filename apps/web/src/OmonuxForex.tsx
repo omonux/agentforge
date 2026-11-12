@@ -156,6 +156,7 @@ export default function OmonuxForex(){
   finally{setEmergencyStopBusy(false)}
  }
  useEffect(()=>{void refreshAutoTradeReadiness()},[]);
+ useEffect(()=>{const timer=setInterval(()=>{void requestJson("/api/v1/trading/forex/auto-trade/research-scheduler").then(setForexScheduler).catch(()=>{})},30000);return ()=>clearInterval(timer)},[]);
  async function refreshStatus(){
   setStatusLoading(true);
   try{
@@ -230,7 +231,7 @@ export default function OmonuxForex(){
     </div>
     <div style={{border:"1px solid #355078",borderRadius:10,padding:12,marginBottom:14,color:"#d6e9ff"}}>
       <strong>Forex M30 research scheduler: {forexScheduler?.enabled?"ENABLED (research only)":"DISABLED"}</strong>
-      <p style={{margin:"6px 0",fontSize:13}}>Last scan: {forexScheduler?.last_cycle_at||"Not run"} · Broker orders: NONE</p>
+      <p style={{margin:"6px 0",fontSize:13}}>{forexScheduler?.running?"Scan running since: "+(forexScheduler?.last_started_at||"unknown"):"Last scan: "+(forexScheduler?.last_cycle_at||"Not run")} · Broker orders: NONE</p>
       <p style={{margin:"6px 0",fontSize:13}}>Pairs: EURUSD, GBPUSD, USDJPY. Research signals do not authorize trading.</p>
       {forexScheduler?.last_results&&<div style={{fontSize:12}}>{Object.entries(forexScheduler.last_results).map(([pair,data])=><p key={pair} style={{margin:"3px 0"}}>{pair}: {(data as any).result||"Unverified"}</p>)}</div>}
     </div>
