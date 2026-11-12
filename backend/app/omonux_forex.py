@@ -667,3 +667,39 @@ def auto_trading_risk_preview(request: AutoTradeRiskRequest):
             "max_open_positions":1,"max_trades_per_day":3,
             "rejection_reasons":reasons,
             "warning":"A passing candidate does not enable execution. Broker order contract, server-side authenticated scheduler, durable risk ledger and reconciliation remain mandatory."}
+
+
+@router.get("/auto-trade/readiness")
+async def mt5_auto_trade_readiness():
+    """Read-only, fail-closed status for the Forex dashboard.
+
+    A broker connection is not evidence that autonomous execution is safe.
+    Do not expose a writable enable switch until broker permissions, persistent
+    limits, reconciliation, and protected-order acceptance are verified.
+    """
+    from .forex_neon_journal import NeonDemoJournal, DurableJournalUnavailable
+    account_id = os.getenv("TICKERALL_ACCOUNT_ID", "")
+    journal_ready = False
+    halted = True
+    if _ACCOUNT_RE.fullmatch(account_id):
+        try:
+            journal = NeonDemoJournal()
+            halted = journal.is_halted(account_id)
+            journal_ready = True
+        except (DurableJournalUnavailable, ValueError):
+            pass
+    return {
+        "mode": "mt5_demo",
+        "auto_trade_enabled": False,
+        "broker_execution_enabled": False,
+        "emergency_stop_active": halted,
+        "durable_journal_ready": journal_ready,
+        "manual_approval_required": True,
+        "status": "BLOCKED",
+        "blockers": [
+            "Automatic broker order scheduler is not connected",
+            "Broker permissions and protected order acceptance are not verified",
+            "Persistent daily loss baseline and reconciliation are not verified",
+        ] + ([] if journal_ready else ["Neon order journal unavailable or not initialized"]),
+        "message": "MT5 auto trading is OFF. No broker orders will be submitted by this control.",
+    }
