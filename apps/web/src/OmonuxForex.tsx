@@ -4,6 +4,8 @@ type Status={feed_configured:boolean;account_configured:boolean;execution_enable
 type Account={id:string;broker?:string;server?:string;is_demo?:boolean;status?:string;hot?:boolean};
 export default function OmonuxForex(){
  const [status,setStatus]=useState<Status|null>(null);
+ const [autoTradeReadiness,setAutoTradeReadiness]=useState<any>(null);
+ const [autoTradeError,setAutoTradeError]=useState("");
  const [accounts,setAccounts]=useState<Account[]>([]);
  const [accountSummary,setAccountSummary]=useState<any>(null);
  const [accountCheckedAt,setAccountCheckedAt]=useState("");
@@ -135,6 +137,11 @@ export default function OmonuxForex(){
   catch(e){setMacroError(e instanceof Error?e.message:"Macroeconomic feed unavailable")}
   finally{setMacroLoading(false)}
  }
+ async function refreshAutoTradeReadiness(){
+  try{setAutoTradeReadiness(await requestJson("/api/v1/trading/forex/auto-trade/readiness"));setAutoTradeError("")}
+  catch(e){setAutoTradeReadiness(null);setAutoTradeError(e instanceof Error?e.message:"Auto-trade readiness unavailable")}
+ }
+ useEffect(()=>{void refreshAutoTradeReadiness()},[]);
  async function refreshStatus(){
   setStatusLoading(true);
   try{
@@ -188,6 +195,14 @@ export default function OmonuxForex(){
       <div className="fx-card" style={{borderTop:"4px solid "+(equity>=baseline?"#10b981":"#ef4444")}}><small>EQUITY VS $100K REFERENCE</small><strong style={{color:equity>=baseline?"#86efac":"#fca5a5"}}>{valid?(equity>=baseline?"+":"")+money(equity-baseline):"—"}</strong><small>Reference only; deposits and withdrawals not adjusted</small></div>
      </div><p style={{fontSize:12,color:"#b7cce6",marginTop:14}}>Last checked: {accountCheckedAt||"—"} · Snapshot on demand, not a streaming feed. Demo funds only. Broker data may be delayed.</p></>
    })():<p style={{color:"#d2e6fa",marginTop:16}}>Click <b>Refresh broker figures</b> to see your latest balance, equity, and whether open positions are gaining or losing. This does not place trades.</p>}
+  </div>
+  <div className="taskrow" style={{border:"2px solid #6885b5",padding:24}} aria-label="MT5 automatic trading controls">
+   <h3 style={{color:"white",marginTop:0}}>MT5 Auto Trade · Demo</h3>
+   <p style={{color:"#d6e9ff"}}>Broker execution status: <b>{autoTradeReadiness?.status||"UNVERIFIED"}</b> · Auto trading: <b>OFF</b> · Emergency stop: <b>{autoTradeReadiness?.emergency_stop_active===false?"Not engaged":"ACTIVE / UNVERIFIED"}</b></p>
+   <div className="actions"><button disabled aria-disabled="true" title="Broker execution safeguards are not verified">Auto Trade OFF · Locked</button><button className="secondary" onClick={()=>void refreshAutoTradeReadiness()}>Refresh auto-trade readiness</button></div>
+   <small style={{display:"block",color:"#fbd38d",marginTop:12}}>This control cannot place orders until the server verifies protected broker execution, persistent risk limits and reconciliation. The paper BUY/SELL buttons below remain simulations.</small>
+   {autoTradeReadiness?.blockers?.length>0&&<ul style={{color:"#d6e9ff"}}>{autoTradeReadiness.blockers.map((item:string)=><li key={item}>{item}</li>)}</ul>}
+   {autoTradeError&&<p role="alert" style={{color:"#fca5a5"}}>{autoTradeError}</p>}
   </div>
   <div className="fx-cards">
    <div className="fx-card" style={{borderTop:"4px solid #10b981"}}><small>DATA CONNECTION</small><strong>{statusLoading?"…":status?.feed_configured?"Online":"Check"}</strong><small>TickerAll integration</small></div>
