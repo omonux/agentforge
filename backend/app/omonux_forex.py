@@ -669,6 +669,28 @@ def auto_trading_risk_preview(request: AutoTradeRiskRequest):
             "warning":"A passing candidate does not enable execution. Broker order contract, server-side authenticated scheduler, durable risk ledger and reconciliation remain mandatory."}
 
 
+@router.post("/auto-trade/emergency-stop")
+async def mt5_demo_emergency_stop():
+    """Owner-authenticated (app middleware), CSRF-protected, idempotent stop.
+
+    This only persists a HALT for future demo order reservations. It never
+    submits, cancels, or closes broker positions.
+    """
+    from .forex_neon_journal import NeonDemoJournal, DurableJournalUnavailable
+    account_id = os.getenv("TICKERALL_ACCOUNT_ID", "")
+    if not _ACCOUNT_RE.fullmatch(account_id):
+        raise HTTPException(status_code=503, detail="MT5 demo account is not configured")
+    try:
+        journal = NeonDemoJournal()
+        journal.set_halted(account_id, True)
+        if not journal.is_halted(account_id):
+            raise DurableJournalUnavailable("Halt read-back did not confirm")
+    except DurableJournalUnavailable:
+        raise HTTPException(status_code=503, detail="Unable to confirm persistent MT5 demo emergency stop")
+    return {"emergency_stop_active": True, "auto_trade_enabled": False,
+            "status": "HALTED", "message": "MT5 demo order reservations halted. Existing broker positions were not modified."}
+
+
 @router.get("/auto-trade/readiness")
 async def mt5_auto_trade_readiness():
     """Read-only, fail-closed status for the Forex dashboard.
