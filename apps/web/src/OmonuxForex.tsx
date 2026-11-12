@@ -6,6 +6,8 @@ export default function OmonuxForex(){
  const [status,setStatus]=useState<Status|null>(null);
  const [autoTradeReadiness,setAutoTradeReadiness]=useState<any>(null);
  const [autoTradeError,setAutoTradeError]=useState("");
+ const [emergencyStopBusy,setEmergencyStopBusy]=useState(false);
+ const [emergencyStopMessage,setEmergencyStopMessage]=useState("");
  const [accounts,setAccounts]=useState<Account[]>([]);
  const [accountSummary,setAccountSummary]=useState<any>(null);
  const [accountCheckedAt,setAccountCheckedAt]=useState("");
@@ -141,6 +143,17 @@ export default function OmonuxForex(){
   try{setAutoTradeReadiness(await requestJson("/api/v1/trading/forex/auto-trade/readiness"));setAutoTradeError("")}
   catch(e){setAutoTradeReadiness(null);setAutoTradeError(e instanceof Error?e.message:"Auto-trade readiness unavailable")}
  }
+ async function engageEmergencyStop(){
+  setEmergencyStopBusy(true);setEmergencyStopMessage("");
+  try{
+   const response=await apiFetch(API+"/api/v1/trading/forex/auto-trade/emergency-stop",{method:"POST",headers:{"Accept":"application/json"}});
+   const data=await response.json();
+   if(!response.ok)throw new Error(data?.detail||"Unable to verify emergency stop");
+   setEmergencyStopMessage(data.message||"Emergency stop confirmed");
+   await refreshAutoTradeReadiness();
+  }catch(e){setAutoTradeError(e instanceof Error?e.message:"Emergency stop failed")}
+  finally{setEmergencyStopBusy(false)}
+ }
  useEffect(()=>{void refreshAutoTradeReadiness()},[]);
  async function refreshStatus(){
   setStatusLoading(true);
@@ -205,6 +218,7 @@ export default function OmonuxForex(){
       </div>
       <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
         <button disabled aria-disabled="true" title="Broker execution safeguards are not verified" style={{whiteSpace:"normal",minHeight:42}}>Auto Trade OFF · Locked</button>
+        <button className="secondary" onClick={()=>void engageEmergencyStop()} disabled={emergencyStopBusy} style={{whiteSpace:"normal",minHeight:42,borderColor:"#f87171",color:"#fecaca"}}>{emergencyStopBusy?"Confirming stop…":"Engage emergency stop"}</button>
         <button className="secondary" onClick={()=>void refreshAutoTradeReadiness()} style={{whiteSpace:"normal",minHeight:42}}>Refresh readiness</button>
       </div>
     </div>
@@ -213,6 +227,7 @@ export default function OmonuxForex(){
       <strong style={{color:"#e2eaff",fontSize:13}}>What must be fixed before enabling:</strong>
       <ul style={{color:"#d6e9ff",lineHeight:1.7,margin:"8px 0 0",paddingLeft:22,overflowWrap:"anywhere"}}>{autoTradeReadiness.blockers.map((item:string)=><li key={item}>{item}</li>)}</ul>
     </div>}
+    {emergencyStopMessage&&<p role="status" style={{color:"#86efac"}}>{emergencyStopMessage}</p>}
     {autoTradeError&&<p role="alert" style={{color:"#fca5a5",overflowWrap:"anywhere"}}>{autoTradeError}</p>}
   </section>
   <div className="fx-cards">
