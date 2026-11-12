@@ -702,26 +702,28 @@ async def mt5_auto_trade_readiness():
     from .forex_neon_journal import NeonDemoJournal, DurableJournalUnavailable
     account_id = os.getenv("TICKERALL_ACCOUNT_ID", "")
     journal_ready = False
-    halted = True
+    snapshot = None
     if _ACCOUNT_RE.fullmatch(account_id):
         try:
             journal = NeonDemoJournal()
-            halted = journal.is_halted(account_id)
+            snapshot = journal.safety_snapshot(account_id)
             journal_ready = True
         except (DurableJournalUnavailable, ValueError):
             pass
+    halted = snapshot["emergency_stop_active"] if snapshot else True
     return {
         "mode": "mt5_demo",
         "auto_trade_enabled": False,
         "broker_execution_enabled": False,
         "emergency_stop_active": halted,
         "durable_journal_ready": journal_ready,
+        "journal_safety": snapshot,
         "manual_approval_required": True,
         "status": "BLOCKED",
         "blockers": [
             "Automatic broker order scheduler is not connected",
             "Broker permissions and protected order acceptance are not verified",
             "Persistent daily loss baseline and reconciliation are not verified",
-        ] + ([] if journal_ready else ["Neon order journal unavailable or not initialized"]),
+        ] + ([] if journal_ready else ["Neon order journal unavailable or not initialized"]) + (["Unreconciled MT5 demo order reservations require review"] if snapshot and snapshot["unresolved_order_count"] else []),
         "message": "MT5 auto trading is OFF. No broker orders will be submitted by this control.",
     }
