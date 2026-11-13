@@ -12,6 +12,8 @@ def numeric(value, allow_zero=False):
         return None
 
 def symbol_evidence(payload, symbol):
+    if isinstance(payload, dict) and isinstance(payload.get("spec"), dict):
+        payload = [payload["spec"]]
     rows = payload if isinstance(payload, list) else payload.get("symbols", []) if isinstance(payload, dict) else []
     if isinstance(rows, dict):
         rows = list(rows.values())
@@ -24,12 +26,13 @@ def symbol_evidence(payload, symbol):
               "max_volume": ("volumeMax", "maxVolume", "maxLot"),
               "volume_step": ("volumeStep", "lotStep"),
               "contract_size": ("contractSize",),
-              "tick_size": ("tickSize",), "tick_value": ("tickValue",),
-              "stops_level": ("stopsLevel",)}
+              "tick_size": ("tickSize",), "tick_value": ("tickValueAccount",),
+              "stops_level": ("stopLevel", "stopsLevel")}
     out = {}
     for name, aliases in fields.items():
         value = next((row[k] for k in aliases if k in row), None)
         out[name] = numeric(value, name == "stops_level")
+    out["spec_source"] = row.get("specSource")
     out["trade_mode"] = row.get("tradeMode")
     return out
 

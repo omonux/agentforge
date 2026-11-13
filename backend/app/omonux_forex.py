@@ -951,9 +951,9 @@ async def mt5_demo_execution_preflight(symbol: str = "EURUSDm"):
                                         str(row.get("status", "")).lower() in ("online", "connected") and
                                         str(account.get("status", "")).lower() == "online")
         if result["session_ready"]:
-            symbols = await _request("GET", f"/v1/accounts/{account_id}/symbols")
+            symbols = await _request("GET", f"/v1/accounts/{account_id}/symbols/{symbol}/spec")
             result["specifications"] = symbol_evidence(symbols, symbol)
-            result["specifications_verified"] = bool(result["specifications"] and all(
+            result["specifications_verified"] = bool(result["specifications"].get("spec_source") == "broker" and all(
                 result["specifications"].get(k) is not None for k in (
                     "min_volume", "max_volume", "volume_step", "contract_size",
                     "tick_size", "tick_value", "stops_level")))
