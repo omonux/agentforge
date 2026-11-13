@@ -91,6 +91,8 @@ async def life(app):
     processed=False
    await asyncio.sleep(1 if processed else max(2,int(os.getenv("WORKFLOW_POLL_SECONDS","3"))))
  from .forex_research_scheduler import research_scheduler
+ from .forex_demo_scheduler import demo_scheduler_supervisor
+ mt5_demo_safety_task=asyncio.create_task(demo_scheduler_supervisor())
  forex_research_task=asyncio.create_task(research_scheduler())
  scheduler=asyncio.create_task(auto_trade_scheduler())
  fast_monitor_scheduler=asyncio.create_task(fast_paper_monitor_scheduler())
@@ -111,13 +113,14 @@ async def life(app):
  try:
   yield
  finally:
+  mt5_demo_safety_task.cancel()
   forex_research_task.cancel()
   scheduler.cancel()
   fast_monitor_scheduler.cancel()
   live_scheduler.cancel()
   workflow_scheduler.cancel()
   youtube_telegram_task.cancel()
-  for task in (forex_research_task,scheduler,fast_monitor_scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task):
+  for task in (mt5_demo_safety_task,forex_research_task,scheduler,fast_monitor_scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task):
    try: await task
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
