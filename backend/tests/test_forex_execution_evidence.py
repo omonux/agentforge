@@ -27,3 +27,16 @@ def test_quote_must_be_fresh_and_timestamped():
     quote["timestamp"] = now.isoformat()
     quote["ask"] = 1.0
     assert quote_evidence(quote, "EURUSDm") == {}
+
+
+def test_documented_single_symbol_spec_uses_account_currency_tick_value():
+    row = {"name": "EURUSDm", "specSource": "broker", "volumeMin": 0.01,
+           "volumeMax": 100, "volumeStep": 0.01, "contractSize": 100000,
+           "tickSize": 0.00001, "tickValue": 1, "tickValueAccount": 1.5,
+           "stopLevel": 0}
+    result = symbol_evidence({"spec": row}, "EURUSDm")
+    assert result["tick_value"] == "1.5"
+    assert result["stops_level"] == "0"
+    assert result["spec_source"] == "broker"
+    del row["tickValueAccount"]
+    assert symbol_evidence({"spec": row}, "EURUSDm")["tick_value"] is None
