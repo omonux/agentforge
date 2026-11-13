@@ -873,6 +873,13 @@ async def mt5_research_scheduler_status():
     return snapshot()
 
 
+@router.get("/auto-trade/demo-scheduler")
+async def mt5_demo_scheduler_status():
+    """Owner-only read-only monitoring status. Never enables orders."""
+    from .forex_demo_scheduler import snapshot
+    return snapshot()
+
+
 @router.get("/auto-trade/readiness")
 async def mt5_auto_trade_readiness():
     """Read-only, fail-closed status for the Forex dashboard.
