@@ -161,12 +161,15 @@ async def _run_specialist(
 
 
 def build_execution_gate(signal: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
-    """Create a fail-closed handoff packet; never authorizes or submits a live order."""
+    """Create a fail-closed BUY/SELL handoff packet; never submits an order."""
     blockers: list[str] = []
     if not summary.get("approved"):
         blockers.append("The twelve-agent consensus did not pass.")
-    if str(signal.get("side", "")).upper() != "BUY":
-        blockers.append("The deterministic strategy signal is not BUY.")
+    side = str(signal.get("side", "")).upper()
+    if side not in {"BUY", "SELL"}:
+        blockers.append("The deterministic strategy signal is not BUY or SELL.")
+    if summary.get("approved_direction") != side:
+        blockers.append("The council direction does not match the strategy signal.")
     if summary.get("completed_agents") != len(SPECIALISTS):
         blockers.append("All twelve specialist responses are required.")
     if summary.get("vetoes"):
@@ -174,9 +177,9 @@ def build_execution_gate(signal: dict[str, Any], summary: dict[str, Any]) -> dic
 
     eligible = not blockers
     requirements = [
-        "Revalidate exchange permissions, available balances, symbol rules and order limits in a fresh exchange-specific preview.",
-        "A human must review the order preview and explicitly confirm each order.",
-        "Autonomous AI-triggered live order placement is disabled; this council cannot submit orders.",
+        "Revalidate the demo account, current quote, spread, broker symbol rules, margin and risk limits immediately before any order.",
+        "A human must review and confirm the demo order preview.",
+        "Automated broker submission is disabled; this council cannot submit orders.",
     ]
     return {
         "candidate_status": "READY_FOR_MANUAL_REVIEW" if eligible else "BLOCKED",
@@ -184,7 +187,7 @@ def build_execution_gate(signal: dict[str, Any], summary: dict[str, Any]) -> dic
         "automatic_live_orders_authorized": False,
         "blockers": blockers,
         "requirements": requirements,
-        "required_next_step": "Create a fresh exchange-specific Spot order preview and require explicit human confirmation." if eligible else "Do not create an order; wait for a new completed-candle scan that passes every gate.",
+        "required_next_step": "Create a fresh broker-specific order preview and require explicit human confirmation." if eligible else "Do not create an order; wait for a new completed-candle scan that passes every gate.",
     }
 
 
