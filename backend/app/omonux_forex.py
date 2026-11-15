@@ -282,6 +282,11 @@ class DemoStopUpdate(BaseModel):
     confirmation: bool = False
 
 
+class DemoAutoProtectRequest(BaseModel):
+    ticket: str = Field(pattern=r"^[0-9]{1,20}$")
+    confirmation: bool = False
+
+
 @router.post("/positions/protect")
 async def protect_existing_demo_position(request: DemoStopUpdate):
     """Explicit one-ticket MT5 demo SL change, with broker read-back confirmation."""
@@ -332,6 +337,91 @@ async def protect_existing_demo_position(request: DemoStopUpdate):
         raise HTTPException(503,"Broker modification unavailable or uncertain. Inspect MT5 before retrying.") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(503,"Broker request failed or timed out. Inspect MT5 before retrying.") from exc
+
+
+@router.post("/positions/auto-protect")
+async def auto_protect_existing_demo_position(request: DemoAutoProtectRequest):
+    """Calculate and install a <=$4-risk SL/TP pair on one MT5 DEMO position.
+
+    Owner-authenticated and explicitly confirmed in the UI. Prices and sizing
+    come from the broker position and contract specification; clients cannot
+    supply or override them. This may reduce or realize an existing position.
+    """
+    import uuid
+    from decimal import Decimal
+    from .tickerall_demo_transport import _request, get_demo_account, BrokerUnavailable
+    from .forex_demo_risk import build_existing_position_protection, RiskRejected
+    if request.confirmation is not True:
+        raise HTTPException(422, "Confirm protection for this one MT5 DEMO position")
+    try:
+        account_id = _account_id()
+        roster = await _tickerall_get("/v1/accounts")
+        account = await get_demo_account(account_id)
+        row = next((a for a in roster if isinstance(a, dict) and a.get("id") == account_id), None) if isinstance(roster, list) else None
+        if not (row and row.get("isDemo") is True
+                and str(row.get("broker", "")).lower() == "mt5"
+                and row.get("hot") is True
+                and str(row.get("status", "")).lower() in ("online", "connected")
+                and str(account.get("broker", "")).lower() == "mt5"
+                and str(account.get("status", "")).lower() == "online"):
+            raise ValueError("A hot, online MT5 DEMO account must be verified")
+        positions_raw = await _tickerall_get("/v1/accounts/" + account_id + "/positions")
+        position = next((p for p in _normalize_demo_positions(positions_raw)
+                         if p["ticket"] == request.ticket), None)
+        if position is None:
+            raise ValueError("That demo position is no longer open; refresh positions")
+        if position["stop_loss_status"] != "not_set" or position["take_profit_status"] != "not_set":
+            raise ValueError("This action only protects a position with both SL and TP unset; refresh and review existing protection")
+        side = position["side"].upper()
+        symbol = position["symbol"]
+        if side not in ("BUY", "SELL") or not symbol or not re.fullmatch(r"[A-Za-z0-9_.-]{3,40}", symbol):
+            raise ValueError("Broker position direction or symbol is invalid")
+        details = account.get("account")
+        if not isinstance(details, dict):
+            raise ValueError("Broker account equity and currency are unavailable")
+        quote = await _tickerall_get(f"/v1/accounts/{account_id}/symbols/{symbol}/quote")
+        spec_response = await _tickerall_get(f"/v1/accounts/{account_id}/symbols/{symbol}/spec")
+        spec = spec_response.get("spec") if isinstance(spec_response, dict) else None
+        market = quote.get("quote", quote) if isinstance(quote, dict) else None
+        if not isinstance(spec, dict) or spec.get("specSource") != "broker" or spec.get("name", spec.get("symbol")) != symbol:
+            raise ValueError("Broker-sourced contract specifications unavailable")
+        if not isinstance(market, dict) or market.get("symbol") != symbol:
+            raise ValueError("Current broker quote is unavailable")
+        plan = build_existing_position_protection(
+            side=side, reference_price=market.get("bid") if side == "BUY" else market.get("ask"),
+            volume=position["volume"],
+            tick_size=spec.get("tickSize"), tick_value_account_per_lot=spec.get("tickValueAccount"),
+            account_equity=details.get("equity"), account_currency=details.get("currency"),
+            bid=market.get("bid"), ask=market.get("ask"),
+            point=spec.get("point"), stop_level_points=spec.get("stopLevel"),
+        )
+        key = str(uuid.uuid4())
+        await _request("PATCH", f"/v1/accounts/{account_id}/positions/{request.ticket}",
+                       payload={"stopLoss": float(plan["stop_loss"]),
+                                "takeProfit": float(plan["take_profit"])},
+                       idempotency_key=key)
+        readback_raw = await _tickerall_get("/v1/accounts/" + account_id + "/positions")
+        readback = next((p for p in _normalize_demo_positions(readback_raw)
+                         if p["ticket"] == request.ticket), None)
+        tolerance = Decimal(str(spec["tickSize"])) / 2
+        if not (readback and readback["stop_loss_status"] == "set"
+                and readback["take_profit_status"] == "set"
+                and abs(Decimal(str(readback["stop_loss"])) - Decimal(plan["stop_loss"])) <= tolerance
+                and abs(Decimal(str(readback["take_profit"])) - Decimal(plan["take_profit"])) <= tolerance):
+            raise HTTPException(409, "Protection request sent but both levels were not confirmed by broker read-back. Inspect MT5; do not blindly retry.")
+        return {"mode": "DEMO_ONLY", "ticket": request.ticket,
+                "stop_loss": readback["stop_loss"], "take_profit": readback["take_profit"],
+                "risk_amount_usd": plan["risk_amount_usd"], "risk_cap_usd": plan["risk_cap_usd"],
+                "reward_to_risk": plan["reward_to_risk"], "confirmed": True,
+                "source": "TickerAll broker position read-back", "order_submitted": False}
+    except RiskRejected as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except BrokerUnavailable as exc:
+        raise HTTPException(503, "Broker protection update unavailable or uncertain. Inspect MT5 before retrying.") from exc
+    except (httpx.HTTPError, TypeError, AttributeError, KeyError) as exc:
+        raise HTTPException(503, "Broker protection update could not be verified. Inspect MT5 before retrying.") from exc
 
 
 @router.get("/auto-trade/risk-evidence")
