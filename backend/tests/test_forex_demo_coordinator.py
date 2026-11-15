@@ -13,7 +13,7 @@ def evidence():
         account_equity="10000",start_of_day_equity="10000",current_equity="10000",
         open_positions=0,requested_volume="0.01",min_volume="0.01",
         max_volume="100",volume_step="0.01",entry_price="1.10",
-        stop_price="1.09",loss_per_price_unit_per_lot="100000",
+        stop_price="1.096",loss_per_price_unit_per_lot="100000",
         available_margin="9000",required_margin="100",
         symbol="EURUSD",side="BUY")
 

@@ -34,7 +34,6 @@ export default function OmonuxForex(){
  const [statusLoading,setStatusLoading]=useState(true);
  const [symbol,setSymbol]=useState("EURUSD");
  const [protectTicket,setProtectTicket]=useState("");
- const [protectStop,setProtectStop]=useState("");
  const [protectConfirm,setProtectConfirm]=useState(false);
  const [protectMessage,setProtectMessage]=useState("");
  const [paperSide,setPaperSide]=useState<"BUY"|"SELL">("BUY");
@@ -91,17 +90,17 @@ export default function OmonuxForex(){
   }));
   setPaperMessage(closed?closed+" simulated position(s) closed at the manually entered observed price. Gaps and slippage are reflected by that price.":"No simulated stop or target crossed at this observed price.");
  }
- async function protectDemoStop(){
-  if(!protectTicket||!Number.isFinite(Number(protectStop))||Number(protectStop)<=0||!protectConfirm){setProtectMessage("Select an unprotected position, enter a valid stop price and confirm.");return}
+ async function autoProtectDemoPosition(){
+  if(!protectTicket||!protectConfirm){setProtectMessage("Select one unprotected demo position and confirm automatic protection.");return}
   setBusy(true);setProtectMessage("");setError("");
   try{
-   const response=await apiFetch(API+"/api/v1/trading/forex/positions/protect",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({ticket:protectTicket,stop_loss:Number(protectStop),confirmation:true})});
+   const response=await apiFetch(API+"/api/v1/trading/forex/positions/auto-protect",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({ticket:protectTicket,confirmation:true})});
    const result=await response.json();
    if(!response.ok)throw Error(typeof result.detail==="string"?result.detail:"Broker protection request failed");
-   setProtectMessage(result.confirmed?"Broker confirmed stop loss for ticket "+protectTicket+".":"Not confirmed; check MT5.");
-   setProtectConfirm(false);setProtectStop("");setProtectTicket("");
+   setProtectMessage(result.confirmed?"Broker confirmed both exits for ticket "+protectTicket+" · SL "+result.stop_loss+" · TP "+result.take_profit+" · maximum planned risk $"+result.risk_amount_usd+".":"Not confirmed; inspect MT5 before retrying.");
+   setProtectConfirm(false);setProtectTicket("");
    setPositions(await requestJson("/api/v1/trading/forex/positions"));
-  }catch(e){setProtectMessage(e instanceof Error?e.message:"Stop update failed; inspect MT5 before retrying")}
+  }catch(e){setProtectMessage(e instanceof Error?e.message:"Protection update failed; inspect MT5 before retrying")}
   finally{setBusy(false)}
  }
  async function requestJson(path:string):Promise<any>{
@@ -298,7 +297,7 @@ export default function OmonuxForex(){
    <button disabled={busy||!status?.account_configured||!(Number(exitTarget)>=1)||!(Number(exitRetrace)>=1)} onClick={()=>get("/api/v1/trading/forex/exit-monitor?profit_target_usd="+encodeURIComponent(exitTarget)+"&trailing_retrace_usd="+encodeURIComponent(exitRetrace),setExitMonitor)}>↻ Analyze open-position exits</button>
    {exitMonitor&&<><p style={{color:"#fbd38d",fontSize:12}}>{exitMonitor.warning}</p><div style={{overflowX:"auto"}}><table><thead><tr><th>Pair</th><th>Ticket</th><th>Floating P/L</th><th>Observed peak</th><th>Pullback</th><th>Assessment</th><th>Broker SL / TP</th></tr></thead><tbody>{exitMonitor.positions.map((p:any)=><tr key={p.ticket}><td>{p.symbol}</td><td>{p.ticket}</td><td style={{color:p.profit_usd>=0?"#86efac":"#fca5a5"}}>{p.profit_usd??"Unknown"}</td><td>{p.peak_profit_usd??"—"}</td><td>{p.drawdown_from_peak_usd??"—"}</td><td>{p.status.replaceAll("_"," ")}</td><td>{p.stop_loss_status} / {p.take_profit_status}</td></tr>)}</tbody></table></div><p style={{fontSize:12,color:"#b9c9e6"}}>Checked {new Date(exitMonitor.retrieved_at).toLocaleString()} · No trades were closed.</p></>}
   </div>}
-  {positions&&positions.count>0&&<div className="taskrow" style={{borderLeft:"4px solid #40a6ba"}}><span><b>Protect one existing MT5 DEMO position</b><small>Uses TickerAll's documented position PATCH API. No automatic price selection; use a broker-valid stop based on your own risk limit. This changes a real DEMO broker position, not the local simulation. Requires the server flag TICKERALL_DEMO_STOP_UPDATES_ENABLED=true.</small><div className="actions"><label>Unprotected position <select value={protectTicket} onChange={e=>{setProtectTicket(e.target.value);setProtectConfirm(false)}}><option value="">Choose ticket</option>{positions.positions.filter((p:any)=>p.ticket&&p.stop_loss_status==="not_set").map((p:any)=><option key={p.ticket} value={p.ticket}>{p.symbol} {p.side} · {p.volume} lots · ticket {p.ticket}</option>)}</select></label><label>Stop-loss price <input type="number" step="any" min="0" value={protectStop} onChange={e=>{setProtectStop(e.target.value);setProtectConfirm(false)}} placeholder="Broker-valid price"/></label></div><label><input type="checkbox" checked={protectConfirm} onChange={e=>setProtectConfirm(e.target.checked)}/> I authorize changing the stop loss on this single MT5 DEMO position</label><div className="actions"><button disabled={busy||!protectTicket||!protectConfirm||!(Number(protectStop)>0)} onClick={()=>void protectDemoStop()}>Apply & verify demo stop loss</button></div>{protectMessage&&<small role="status">{protectMessage}</small>}</span></div>}
+  {positions&&positions.positions.some((p:any)=>p.stop_loss_status==="not_set"&&p.take_profit_status==="not_set")&&<div className="taskrow" style={{borderLeft:"4px solid #40a6ba"}}><span><b>AI protection for one existing MT5 DEMO position</b><small>AgentForge calculates broker-aligned stop loss and take profit from the position, live quote and broker contract. Planned loss is capped at the lower of $4 or 0.25% of demo equity; target is 2R. The broker must accept both levels and confirm them by read-back. Slippage or price gaps can make realized loss differ.</small><div className="actions"><label>Unprotected position <select value={protectTicket} onChange={e=>{setProtectTicket(e.target.value);setProtectConfirm(false)}}><option value="">Choose position</option>{positions.positions.filter((p:any)=>p.ticket&&p.stop_loss_status==="not_set"&&p.take_profit_status==="not_set").map((p:any)=><option key={p.ticket} value={p.ticket}>{p.symbol} {p.side} · {p.volume} lots · ticket {p.ticket}</option>)}</select></label></div><label><input type="checkbox" checked={protectConfirm} onChange={e=>setProtectConfirm(e.target.checked)}/> I authorize AgentForge to set both SL and TP on this single MT5 DEMO position using the $4 maximum planned risk.</label><div className="actions"><button disabled={busy||!protectTicket||!protectConfirm} onClick={()=>void autoProtectDemoPosition()}>Calculate, set & verify demo exits</button></div>{protectMessage&&<small role="status">{protectMessage}</small>}</span></div>}
   {accounts.map(a=><div className="taskrow" key={a.id}><span><b>{a.broker||"MT5"} · {a.server||"Broker"}</b><small>Account ID: {a.id} · {a.is_demo?"DEMO":"Not verified as demo"} · {a.status||"Unknown"} · {a.hot===true?"Session reported hot":a.hot===false?"Session reported cold":"Session state not checked"}</small></span></div>)}
   {accounts.filter(a=>a.is_demo).length>1&&<label>Demo account <select value={selectedAccountId} onChange={e=>{setSelectedAccountId(e.target.value);setVerified(false)}}>{accounts.filter(a=>a.is_demo).map(a=><option key={a.id} value={a.id}>{a.server||"MT5"} · {a.id}</option>)}</select></label>}
   {verified&&<p role="status">Demo account verified successfully. Broker execution remains disabled.</p>}
