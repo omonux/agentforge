@@ -595,8 +595,30 @@ async def forex_research(symbol: str, timeframe: str = "M30", hours: int = 168):
                                     base, key, model, market_type="forex")
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
+    gate = council.get("execution_gate", {})
+    agents = {item.get("id"): item for item in council.get("agents", []) if isinstance(item, dict)}
+    advisor_roles = {}
+    for role_id in ("strategy", "red_team"):
+        vote = agents.get(role_id)
+        advisor_roles[role_id] = ({key: vote.get(key) for key in
+                                  ("id", "name", "stance", "confidence", "reason", "veto", "status")}
+                                  if vote else {"status": "unavailable", "stance": "HOLD"})
+    levels = signal.get("risk_levels", {})
+    trade_plan = {
+        "decision": (signal["side"] + "_CANDIDATE") if gate.get("manual_review_eligible") else "NO_TRADE",
+        "side": signal["side"],
+        "entry_reference": signal.get("latest_closed_price"),
+        "stop_loss_reference": levels.get("stop_reference"),
+        "take_profit_reference": levels.get("target_reference"),
+        "reward_to_risk_reference": 2.0 if levels else None,
+        "advisor_roles": advisor_roles,
+        "manual_review_eligible": bool(gate.get("manual_review_eligible")),
+        "order_submitted": False,
+        "notice": "Entry is the last completed-candle close, not a live quote. Stop and target are research references; the broker must validate current prices, spread, stop distance and account-currency risk before any demo order.",
+    }
     return {"symbol": symbol.upper(), "timeframe": timeframe, "signal": signal,
-            "council": council, "risk_warning": risk_warning, "execution": "research_only_no_order_placed"}
+            "council": council, "trade_plan": trade_plan, "risk_warning": risk_warning,
+            "execution": "research_only_no_order_placed"}
 
 
 # Public macroeconomic intelligence: World Bank annual indicators. Read-only.

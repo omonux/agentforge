@@ -89,6 +89,21 @@ def test_execution_gate_only_qualifies_candidate_for_manual_review():
     assert any("human" in item.lower() for item in gate["requirements"])
 
 
+def test_execution_gate_allows_sell_candidate_when_council_agrees():
+    summary = summarize_votes(_votes(buy=0, sell=8), direction="SELL")
+    gate = build_execution_gate({"side": "SELL"}, summary)
+    assert gate["candidate_status"] == "READY_FOR_MANUAL_REVIEW"
+    assert gate["manual_review_eligible"] is True
+    assert gate["automatic_live_orders_authorized"] is False
+
+
+def test_execution_gate_rejects_direction_mismatch():
+    summary = summarize_votes(_votes(), direction="BUY")
+    gate = build_execution_gate({"side": "SELL"}, summary)
+    assert gate["manual_review_eligible"] is False
+    assert "The council direction does not match the strategy signal." in gate["blockers"]
+
+
 @pytest.mark.parametrize("signal,summary", [
     ({"side": "HOLD"}, summarize_votes(_votes())),
     ({"side": "BUY"}, summarize_votes(_votes(veto=True))),
