@@ -1,5 +1,5 @@
 # Build the React dashboard.
-FROM node:20-alpine AS frontend
+FROM node:20-slim AS frontend
 WORKDIR /build
 COPY apps/web/package*.json ./
 RUN npm ci
