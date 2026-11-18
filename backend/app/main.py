@@ -712,7 +712,7 @@ def auth_me(request:Request):
 @app.middleware("http")
 async def require_private_workspace(request:Request,call_next):
  path=request.url.path
- if path=="/health" or path=="/api/v1/auth/login" or path=="/api/v1/auth/me" or path in ("/api/v1/youtube/oauth/callback", "/api/v1/commerce/shopify/oauth/callback", "/api/v1/billing/webhooks/paystack", "/api/v1/billing/webhooks/opay"):
+ if path=="/health" or path=="/api/v1/auth/login" or path=="/api/v1/auth/me" or path in ("/api/v1/youtube/oauth/callback", "/api/v1/commerce/shopify/oauth/callback", "/api/v1/commerce/public/inquiries", "/api/v1/billing/webhooks/paystack", "/api/v1/billing/webhooks/opay"):
   return await call_next(request)
  cfg=auth_config()
  if not cfg:
