@@ -11,7 +11,7 @@ export default function ConnectAPI({ onNotice }: Props) {
   const [services, setServices] = useState<Service[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [edited, setEdited] = useState<Record<string, boolean>>({});
-  const defaults: Record<string, string> = { ai_base_url: "https://api.openai.com/v1", ai_model: "gpt-4.1-mini", image_base_url: "https://api.openai.com/v1", image_model: "gpt-image-1" };
+  const defaults: Record<string, string> = { ai_base_url: "https://api.openai.com/v1", ai_model: "gpt-4.1-mini", image_base_url: "https://api.openai.com/v1", image_model: "gpt-image-1", shopify_redirect_uri: "https://agentforge-omonux.onrender.com/api/v1/commerce/shopify/oauth/callback" };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [testing, setTesting] = useState("");
