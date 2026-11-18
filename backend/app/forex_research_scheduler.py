@@ -35,11 +35,19 @@ async def run_cycle():
                 }
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                # Preserve only the controlled message from our own HTTP
+                # routes; never expose arbitrary provider exception text.
+                from fastapi import HTTPException
+                reason = (str(exc.detail)[:200]
+                          if isinstance(exc, HTTPException)
+                          and isinstance(exc.detail, str)
+                          else "Research request failed; check broker feed and AI configuration")
                 STATUS["last_results"][pair] = {
                     "checked_at": datetime.now(timezone.utc).isoformat(),
                     "result": "research_unavailable",
                     "execution": "no_order_placed",
+                    "reason": reason,
                 }
         STATUS["last_cycle_at"] = datetime.now(timezone.utc).isoformat()
         STATUS["last_error"] = None

@@ -1038,6 +1038,50 @@ async def mt5_auto_trade_readiness():
     }
 
 
+@router.post("/auto-trade/daily-baseline")
+async def record_mt5_demo_daily_baseline():
+    """Persist today's starting equity from the verified MT5 demo account.
+
+    This is a read-from-broker/write-to-Neon operation only. It does not
+    submit, modify, or close any broker order. The journal preserves the
+    first baseline for the UTC trading day and will not overwrite it.
+    """
+    from .forex_neon_journal import NeonDemoJournal, DurableJournalUnavailable
+    from .tickerall_demo_transport import _request, get_demo_account, BrokerUnavailable
+    try:
+        account_id = _account_id()
+        roster = await _request("GET", "/v1/accounts")
+        account = await get_demo_account(account_id)
+        row = next((item for item in roster if isinstance(item, dict)
+                    and item.get("id") == account_id), None) if isinstance(roster, list) else None
+        if (not row or row.get("isDemo") is not True
+                or str(row.get("broker", "")).lower() != "mt5"
+                or row.get("hot") is not True
+                or str(row.get("status", "")).lower() not in ("online", "connected")
+                or account.get("isDemo") is not True
+                or str(account.get("broker", "")).lower() != "mt5"
+                or str(account.get("status", "")).lower() != "online"):
+            raise BrokerUnavailable("A hot, verified MT5 demo account is required")
+        details = account.get("account")
+        if not isinstance(details, dict):
+            raise BrokerUnavailable("Broker account equity is unavailable")
+        equity = details.get("equity")
+        currency = details.get("currency")
+        if isinstance(equity, bool) or equity is None or str(currency or "").upper() != "USD":
+            raise BrokerUnavailable("Positive USD demo equity is required for this risk policy")
+        journal = NeonDemoJournal()
+        journal.initialize()
+        baseline = journal.record_daily_equity_baseline(
+            account_id, datetime.now(timezone.utc).date(), str(equity), currency)
+        return {"mode": "MT5_DEMO_ONLY", "stored": True,
+                "order_submitted": False, "baseline": baseline,
+                "message": "Today's first broker-verified demo equity baseline is stored. This does not enable trading."}
+    except (ValueError, BrokerUnavailable, DurableJournalUnavailable) as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except (httpx.HTTPError, TypeError, AttributeError) as exc:
+        raise HTTPException(503, "Could not verify demo equity; baseline was not recorded") from exc
+
+
 @router.get("/auto-trade/execution-preflight")
 async def mt5_demo_execution_preflight(symbol: str = "EURUSDm"):
     """Read-only MT5 broker evidence; cannot unlock trading or submit orders."""

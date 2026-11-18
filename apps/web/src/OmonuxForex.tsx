@@ -8,6 +8,8 @@ export default function OmonuxForex(){
  const [forexScheduler,setForexScheduler]=useState<any>(null);
  const [brokerVerification,setBrokerVerification]=useState<any>(null);
  const [autoTradeError,setAutoTradeError]=useState("");
+ const [dailyBaselineMessage,setDailyBaselineMessage]=useState("");
+ const [dailyBaselineBusy,setDailyBaselineBusy]=useState(false);
  const [emergencyStopBusy,setEmergencyStopBusy]=useState(false);
  const [emergencyStopMessage,setEmergencyStopMessage]=useState("");
  const [accounts,setAccounts]=useState<Account[]>([]);
@@ -155,6 +157,18 @@ export default function OmonuxForex(){
   }catch(e){setAutoTradeError(e instanceof Error?e.message:"Emergency stop failed")}
   finally{setEmergencyStopBusy(false)}
  }
+ async function recordDailyBaseline(){
+  setDailyBaselineBusy(true);setDailyBaselineMessage("");
+  try{
+   const response=await apiFetch(API+"/api/v1/trading/forex/auto-trade/daily-baseline",{method:"POST",headers:{"Accept":"application/json"}});
+   const data=await response.json();
+   if(!response.ok)throw new Error(data?.detail||"Unable to record broker equity baseline");
+   const b=data?.baseline;
+   setDailyBaselineMessage("Stored first verified USD demo equity for UTC day "+(b?.trading_day||"today")+": $"+(b?.start_equity||"—")+". Trading remains OFF.");
+   await refreshAutoTradeReadiness();
+  }catch(e){setDailyBaselineMessage(e instanceof Error?e.message:"Baseline could not be verified; no trading was enabled")}
+  finally{setDailyBaselineBusy(false)}
+ }
  useEffect(()=>{void refreshAutoTradeReadiness()},[]);
  useEffect(()=>{const timer=setInterval(()=>{void requestJson("/api/v1/trading/forex/auto-trade/research-scheduler").then(setForexScheduler).catch(()=>{})},30000);return ()=>clearInterval(timer)},[]);
  async function refreshStatus(){
@@ -222,12 +236,15 @@ export default function OmonuxForex(){
         <button disabled aria-disabled="true" title="Broker execution safeguards are not verified" style={{whiteSpace:"normal",minHeight:42}}>Auto Trade OFF · Locked</button>
         <button className="secondary" onClick={()=>void engageEmergencyStop()} disabled={emergencyStopBusy} style={{whiteSpace:"normal",minHeight:42,borderColor:"#f87171",color:"#fecaca"}}>{emergencyStopBusy?"Confirming stop…":"Engage emergency stop"}</button>
         <button className="secondary" onClick={()=>void refreshAutoTradeReadiness()} style={{whiteSpace:"normal",minHeight:42}}>Refresh readiness</button>
+        <button className="secondary" onClick={()=>void recordDailyBaseline()} disabled={dailyBaselineBusy||!status?.account_configured} style={{whiteSpace:"normal",minHeight:42}}>{dailyBaselineBusy?"Verifying demo equity…":"Record today's risk baseline"}</button>
       </div>
     </div>
+    <p style={{fontSize:12,color:"#c6d9f1",marginTop:0}}>This stores the first verified USD demo equity snapshot for the UTC day in Neon. It does not place orders or unlock Auto Trade. {dailyBaselineMessage}</p>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:14}}>
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>NEON ORDER JOURNAL</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.durable_journal_ready?"Connected":"Unverified"}</div></div>
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>UNRESOLVED DEMO ORDERS</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.unresolved_order_count??"Unverified"}</div></div>
       <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>PERSISTED EMERGENCY STOP</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.journal_safety?.emergency_stop_record_exists?(autoTradeReadiness?.emergency_stop_active?"Engaged":"Not engaged"):"Default fail-closed"}</div></div>
+      <div style={{border:"1px solid #355078",borderRadius:10,padding:12,color:"#d6e9ff"}}><small>UTC DAILY EQUITY BASELINE</small><div style={{fontWeight:700,marginTop:5}}>{autoTradeReadiness?.daily_risk_baseline?.start_equity?"$"+autoTradeReadiness.daily_risk_baseline.start_equity:"Not recorded"}</div><small>{autoTradeReadiness?.daily_risk_baseline?.trading_day||"Needed for the daily loss limit"}</small></div>
     </div>
     <div style={{border:"1px solid #355078",borderRadius:10,padding:12,marginBottom:14,color:"#d6e9ff"}}>
       <strong>MT5 demo broker verification (read-only)</strong>
@@ -239,7 +256,7 @@ export default function OmonuxForex(){
       <strong>Forex M30 research scheduler: {forexScheduler?.enabled?"ENABLED (research only)":"DISABLED"}</strong>
       <p style={{margin:"6px 0",fontSize:13}}>{forexScheduler?.running?"Scan running since: "+(forexScheduler?.last_started_at||"unknown"):"Last scan: "+(forexScheduler?.last_cycle_at||"Not run")} · Broker orders: NONE</p>
       <p style={{margin:"6px 0",fontSize:13}}>Pairs: EURUSD, GBPUSD, USDJPY. Research signals do not authorize trading.</p>
-      {forexScheduler?.last_results&&<div style={{fontSize:12}}>{Object.entries(forexScheduler.last_results).map(([pair,data])=><p key={pair} style={{margin:"3px 0"}}>{pair}: {(data as any).result||"Unverified"}</p>)}</div>}
+      {forexScheduler?.last_results&&<div style={{fontSize:12}}>{Object.entries(forexScheduler.last_results).map(([pair,data])=><p key={pair} style={{margin:"3px 0"}}>{pair}: {(data as any).result||"Unverified"}{(data as any).reason?" · "+(data as any).reason:""}</p>)}</div>}
     </div>
     <p style={{color:"#fbd38d",fontSize:13,lineHeight:1.6,margin:"0 0 12px"}}>Automatic broker trading remains disabled until protected-order execution, persistent risk limits and reconciliation are verified. The paper BUY/SELL buttons are simulations.</p>
     {autoTradeReadiness?.blockers?.length>0&&<div style={{borderTop:"1px solid #355078",paddingTop:12}}>
