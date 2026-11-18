@@ -41,6 +41,16 @@ SERVICES = [
         {"name":"elevenlabs_api_key","label":"ElevenLabs API key","kind":"secret","required":True,"help":"Your ElevenLabs API key."},
         {"name":"elevenlabs_voice_id","label":"Voice ID","kind":"text","required":True,"help":"The voice you have permission to use."},
         {"name":"elevenlabs_model","label":"Voice model","kind":"text","required":False,"help":"Default: eleven_multilingual_v2"}]},
+    {"id":"commerce_search","name":"Product Discovery Search","group":"Commerce Agent","description":"Searches the web for supplier and product leads. Results are research leads, not proof of stock, pricing or resale rights.","testable":True,"fields":[
+        {"name":"tavily_api_key","label":"Tavily Search API key","kind":"secret","required":True,"help":"Used by the Commerce Agent to search for current product and supplier pages."}]},
+    {"id":"commerce_shopify","name":"Shopify Store","group":"Commerce Agent","description":"Connect a Shopify app for a store you own. Product drafts are created only when you click the action in Commerce Agent.","testable":True,"fields":[
+        {"name":"shopify_client_id","label":"Shopify app client ID","kind":"secret","required":True,"help":"From your Shopify Dev Dashboard app settings."},
+        {"name":"shopify_client_secret","label":"Shopify app client secret","kind":"secret","required":True,"help":"Encrypted by AgentForge. Never paste it into chat."},
+        {"name":"shopify_redirect_uri","label":"Shopify OAuth redirect URL","kind":"text","required":True,"help":"Register this exact HTTPS URL in the app: https://agentforge-omonux.onrender.com/api/v1/commerce/shopify/oauth/callback"}]},
+    {"id":"commerce_jumia","name":"Jumia Seller API","group":"Commerce Agent","description":"Store your account-issued Seller API details securely. Automated Jumia actions remain unavailable until the account API contract is verified.","testable":False,"fields":[
+        {"name":"jumia_seller_api_key","label":"Jumia Seller API key","kind":"secret","required":False,"help":"Use only credentials issued by Jumia Seller Center."},
+        {"name":"jumia_seller_api_base","label":"Jumia Seller API base URL","kind":"text","required":False,"help":"Enter the official URL given for your account. It is saved encrypted; requests are not sent yet."},
+        {"name":"jumia_seller_id","label":"Jumia seller/account ID","kind":"text","required":False,"help":"Account identifier supplied by Seller Center."}]},
     {"id":"payments","name":"Payments","group":"Business services","description":"Paystack and OPay hosted checkout. Checkout remains disabled until BILLING_ENABLED is deliberately enabled in server settings after sandbox verification.","testable":True,"fields":[
         {"name":"paystack_secret_key","label":"Paystack secret key","kind":"secret","required":False,"help":"Use a test key for sandbox validation; never enable live billing until reviewed."},
         {"name":"paystack_public_key","label":"Paystack public key","kind":"secret","required":False,"help":"Public checkout identifier; optional for the current hosted flow."},
@@ -71,6 +81,8 @@ ENV_FALLBACKS = {
     "youtube_redirect_uri":"YOUTUBE_REDIRECT_URI","youtube_region":"YOUTUBE_REGION",
     "telegram_bot_token":"","telegram_chat_id":"",
     "elevenlabs_api_key":"","elevenlabs_voice_id":"","elevenlabs_model":"",
+    "tavily_api_key":"","shopify_client_id":"","shopify_redirect_uri":"",
+    "jumia_seller_api_key":"","jumia_seller_api_base":"","jumia_seller_id":"",
     "paystack_secret_key":"PAYSTACK_SECRET_KEY","paystack_public_key":"",
     "paystack_pro_monthly_plan_code":"PAYSTACK_PRO_MONTHLY_PLAN_CODE","paystack_business_monthly_plan_code":"PAYSTACK_BUSINESS_MONTHLY_PLAN_CODE",
     "opay_public_key":"OPAY_PUBLIC_KEY","opay_secret_key":"OPAY_SECRET_KEY",
@@ -230,6 +242,22 @@ async def test_connection(service_id: str):
                 response=await client.get("https://api.elevenlabs.io/v1/user",headers={"xi-api-key":key})
             if response.status_code>=400: raise HTTPException(502,"ElevenLabs did not accept the API key.")
             message="ElevenLabs account authentication succeeded."
+        elif service_id=="commerce_search":
+            key=read_secret("tavily_api_key")
+            if not key: raise HTTPException(409,"Add the Tavily Search API key first.")
+            async with httpx.AsyncClient(timeout=20) as client:
+                response=await client.post("https://api.tavily.com/search",headers={"Authorization":"Bearer "+key},
+                    json={"query":"wholesale suppliers Nigeria test","search_depth":"basic","max_results":1,"include_answer":False})
+            if response.status_code>=400: raise HTTPException(502,"Tavily rejected the search key or request.")
+            message="Tavily search request succeeded. This test uses one search request."
+        elif service_id=="commerce_shopify":
+            if not (read_secret("shopify_client_id") and read_secret("shopify_client_secret") and read_secret("shopify_redirect_uri")):
+                raise HTTPException(409,"Add the Shopify app client ID, secret and redirect URL first.")
+            from .commerce_agent import test_shopify
+            result=await test_shopify()
+            message="Shopify store connected: "+result["shop"]
+        elif service_id=="commerce_jumia":
+            message="Jumia details are saved encrypted. No API request was made because the account-specific API contract has not been verified."
         elif service_id=="payments":
             paystack=read_secret("paystack_secret_key")
             if paystack:
@@ -243,8 +271,9 @@ async def test_connection(service_id: str):
                 message="OPay credentials are saved. Complete the merchant-specific sandbox checkout test before enabling billing."
         else:
             raise HTTPException(400,"No test is available for this service.")
-        _save_check(service_id,"configured" if service_id=="youtube" else ("manual" if service_id=="payments" and not read_secret("paystack_secret_key") else "connected"),message)
-        return {"service":service_id,"status":"configured" if service_id=="youtube" else ("manual" if service_id=="payments" and not read_secret("paystack_secret_key") else "connected"),"message":message}
+        status="configured" if service_id=="youtube" else ("manual" if service_id=="commerce_jumia" or (service_id=="payments" and not read_secret("paystack_secret_key")) else "connected")
+        _save_check(service_id,status,message)
+        return {"service":service_id,"status":status,"message":message}
     except HTTPException as exc:
         _save_check(service_id,"error",str(exc.detail))
         raise

@@ -108,8 +108,20 @@ async def life(app):
    except Exception:
     pass
    await asyncio.sleep(max(300,int(os.getenv("YOUTUBE_TELEGRAM_POLL_SECONDS","3600"))))
+ async def commerce_discovery_scheduler():
+  await asyncio.sleep(45)
+  while True:
+   try:
+    from .commerce_agent import scheduled_discovery_scan
+    await scheduled_discovery_scan()
+   except asyncio.CancelledError:
+    raise
+   except Exception:
+    pass
+   await asyncio.sleep(max(300,int(os.getenv("COMMERCE_SCAN_POLL_SECONDS","1800"))))
  workflow_scheduler=asyncio.create_task(workflow_queue_scheduler())
  youtube_telegram_task=asyncio.create_task(youtube_telegram_scheduler())
+ commerce_task=asyncio.create_task(commerce_discovery_scheduler())
  try:
   yield
  finally:
@@ -120,7 +132,8 @@ async def life(app):
   live_scheduler.cancel()
   workflow_scheduler.cancel()
   youtube_telegram_task.cancel()
-  for task in (mt5_demo_safety_task,forex_research_task,scheduler,fast_monitor_scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task):
+  commerce_task.cancel()
+  for task in (mt5_demo_safety_task,forex_research_task,scheduler,fast_monitor_scheduler,live_scheduler,workflow_scheduler,youtube_telegram_task,commerce_task):
    try: await task
    except asyncio.CancelledError: pass
 app=FastAPI(title="AgentForge API",version="0.1.0",lifespan=life)
@@ -699,7 +712,7 @@ def auth_me(request:Request):
 @app.middleware("http")
 async def require_private_workspace(request:Request,call_next):
  path=request.url.path
- if path=="/health" or path=="/api/v1/auth/login" or path=="/api/v1/auth/me" or path=="/api/v1/youtube/oauth/callback" or path in ("/api/v1/billing/webhooks/paystack", "/api/v1/billing/webhooks/opay"):
+ if path=="/health" or path=="/api/v1/auth/login" or path=="/api/v1/auth/me" or path in ("/api/v1/youtube/oauth/callback", "/api/v1/commerce/shopify/oauth/callback", "/api/v1/billing/webhooks/paystack", "/api/v1/billing/webhooks/opay"):
   return await call_next(request)
  cfg=auth_config()
  if not cfg:
@@ -1247,6 +1260,10 @@ from .connect_api import router as connect_api_router
 app.include_router(connect_api_router)
 from .workflow_engine import router as workflow_runs_router
 app.include_router(workflow_runs_router)
+
+# Multi-channel commerce discovery, pricing, copy and account-authorized drafts.
+from .commerce_agent import router as commerce_agent_router
+app.include_router(commerce_agent_router)
 
 
 # OMONUX 50-market discovery API. Research-only; this route cannot place orders.
