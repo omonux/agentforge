@@ -30,9 +30,11 @@ class DailyBaselineRouteTests(unittest.IsolatedAsyncioTestCase):
         journal_module = types.ModuleType("app.forex_neon_journal")
         journal_module.NeonDemoJournal = lambda: self.journal
         journal_module.DurableJournalUnavailable = RuntimeError
+        self.fake_journal_module = journal_module
         self.journal_module = patch.dict(sys.modules,
                                          {"app.forex_neon_journal": journal_module})
         self.journal_module.start()
+        self.addCleanup(self._remove_stale_package_attribute)
         self.request = patch.object(tickerall_demo_transport, "_request",
                              return_value=[{"id": "demo-account", "isDemo": True,
                                             "broker": "mt5", "hot": True,
@@ -52,6 +54,11 @@ class DailyBaselineRouteTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.journal_module.stop)
         self.addCleanup(self.account_id.stop)
 
+    def _remove_stale_package_attribute(self):
+        import app
+        if getattr(app, "forex_neon_journal", None) is self.fake_journal_module:
+            delattr(app, "forex_neon_journal")
+
     async def test_stores_only_verified_demo_usd_equity(self):
         result = await record_mt5_demo_daily_baseline()
         self.assertTrue(self.journal.initialized)
@@ -67,6 +74,7 @@ class DailyBaselineRouteTests(unittest.IsolatedAsyncioTestCase):
                                             "broker": "mt5", "hot": False,
                                             "status": "online"}])
         self.request.start()
+        self.addCleanup(self.request.stop)
         with self.assertRaises(HTTPException):
             await record_mt5_demo_daily_baseline()
         self.assertFalse(self.journal.initialized)
@@ -80,6 +88,7 @@ class DailyBaselineRouteTests(unittest.IsolatedAsyncioTestCase):
                                                "account": {"equity": "10000.25",
                                                            "currency": "EUR"}})
         self.get_account.start()
+        self.addCleanup(self.get_account.stop)
         with self.assertRaises(HTTPException):
             await record_mt5_demo_daily_baseline()
         self.assertFalse(self.journal.initialized)
