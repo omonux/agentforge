@@ -5,6 +5,7 @@ Only presence/status metadata is returned to the browser; plaintext values never
 leave this module after a save operation.
 """
 import os
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -34,7 +35,7 @@ SERVICES = [
         {"name":"youtube_client_secret","label":"Google OAuth client secret","kind":"secret","required":True,"help":"Keep this private; never paste it into chat. Reconnect the channel after granting the added Analytics scopes."},
         {"name":"youtube_redirect_uri","label":"OAuth redirect URI","kind":"text","required":True,"help":"Must exactly match your Google Cloud OAuth redirect URI. Include the deployed host URL."},
         {"name":"youtube_region","label":"Trend region code","kind":"text","required":False,"help":"Example: NG"}]},
-    {"id":"telegram","name":"Telegram Notifications","group":"Publishing and alerts","description":"Sends approval, render, publishing and supported channel-metric notifications to your Telegram chat.","testable":True,"fields":[
+    {"id":"telegram","name":"Telegram Notifications","group":"Publishing and alerts","description":"Sends private customer inquiry and workspace alerts to your Telegram chat. It does not collect or process payments.","testable":True,"fields":[
         {"name":"telegram_bot_token","label":"Telegram bot token","kind":"secret","required":True,"help":"Create a bot with BotFather."},
         {"name":"telegram_chat_id","label":"Telegram chat ID","kind":"text","required":True,"help":"Start your bot and obtain your private chat ID."}]},
     {"id":"voice","name":"AI Voice Generation","group":"Media generation","description":"Optional voice narration for video drafts using ElevenLabs.","testable":True,"fields":[
@@ -51,6 +52,10 @@ SERVICES = [
         {"name":"jumia_seller_api_key","label":"Jumia Seller API key","kind":"secret","required":False,"help":"Use only credentials issued by Jumia Seller Center."},
         {"name":"jumia_seller_api_base","label":"Jumia Seller API base URL","kind":"text","required":False,"help":"Enter the official URL given for your account. It is saved encrypted; requests are not sent yet."},
         {"name":"jumia_seller_id","label":"Jumia seller/account ID","kind":"text","required":False,"help":"Account identifier supplied by Seller Center."}]},
+    {"id":"commerce_email","name":"Customer Reply Email","group":"Commerce Agent","description":"Send owner-reviewed replies to customer inquiries using your verified sending domain.","testable":True,"fields":[
+        {"name":"resend_api_key","label":"Resend API key","kind":"secret","required":True,"help":"Create a Resend API key with email sending permission. Keep it private."},
+        {"name":"commerce_sender_email","label":"Verified sender email","kind":"secret","required":True,"help":"Use an address on a domain verified in Resend."},
+        {"name":"commerce_sender_name","label":"Sender name","kind":"text","required":True,"help":"Name customers will see, such as Omonux Store."}]},
     {"id":"payments","name":"Payments","group":"Business services","description":"Paystack and OPay hosted checkout. Checkout remains disabled until BILLING_ENABLED is deliberately enabled in server settings after sandbox verification.","testable":True,"fields":[
         {"name":"paystack_secret_key","label":"Paystack secret key","kind":"secret","required":False,"help":"Use a test key for sandbox validation; never enable live billing until reviewed."},
         {"name":"paystack_public_key","label":"Paystack public key","kind":"secret","required":False,"help":"Public checkout identifier; optional for the current hosted flow."},
@@ -168,6 +173,7 @@ async def test_connection(service_id: str):
     if not service["testable"]:
         _save_check(service_id,"manual","Credentials are stored encrypted. This integration is restricted to testnet/manual verification.")
         return {"service":service_id,"status":"manual","message":"Credentials saved. This service is not activated by a credential test."}
+    email_domain_verified=None
     try:
         if service_id=="ai":
             base=secret_or_env("ai_base_url","AI_BASE_URL").rstrip("/")
@@ -258,6 +264,18 @@ async def test_connection(service_id: str):
             message="Shopify store connected: "+result["shop"]
         elif service_id=="commerce_jumia":
             message="Jumia details are saved encrypted. No API request was made because the account-specific API contract has not been verified."
+        elif service_id=="commerce_email":
+            key=read_secret("resend_api_key")
+            sender=read_secret("commerce_sender_email")
+            if not (key and sender): raise HTTPException(409,"Add the Resend key and verified sender email first.")
+            if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+",sender): raise HTTPException(409,"The sender email is not valid.")
+            async with httpx.AsyncClient(timeout=20) as client:
+                response=await client.get("https://api.resend.com/domains",headers={"Authorization":"Bearer "+key})
+            if response.status_code>=400: raise HTTPException(502,"Resend rejected the API key.")
+            domains=response.json().get("data",[])
+            domain=sender.rsplit("@",1)[-1].lower()
+            email_domain_verified=any(str(item.get("name","")).lower()==domain and item.get("status")=="verified" for item in domains)
+            message="Resend API key accepted; sender domain verified." if email_domain_verified else "Resend API key accepted, but the sender domain is not yet verified. Verify it in Resend before sending replies."
         elif service_id=="payments":
             paystack=read_secret("paystack_secret_key")
             if paystack:
@@ -272,6 +290,7 @@ async def test_connection(service_id: str):
         else:
             raise HTTPException(400,"No test is available for this service.")
         status="configured" if service_id=="youtube" else ("manual" if service_id=="commerce_jumia" or (service_id=="payments" and not read_secret("paystack_secret_key")) else "connected")
+        if service_id=="commerce_email" and not email_domain_verified: status="needs_verification"
         _save_check(service_id,status,message)
         return {"service":service_id,"status":status,"message":message}
     except HTTPException as exc:
