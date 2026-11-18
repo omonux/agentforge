@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertCircle, ArrowUpRight, BadgeCheck, CheckCircle2, CircleDollarSign, Copy, ExternalLink, Globe2, LoaderCircle, PackageSearch, Plus, RefreshCw, Search, ShieldCheck, Sparkles, Store, Trash2 } from "lucide-react";
 import { API, apiFetch } from "./api";
+import CommerceInbox from "./CommerceInbox";
 import "./commerce-agent.css";
 
 type Product = {
@@ -11,7 +12,7 @@ type Product = {
   source_verified: boolean; resale_authorized: boolean; status: string; channel_ids: Record<string, any>;
   listing_copy: { title: string; description: string; promo_caption: string } | null;
 };
-type Overview = { settings: any; products: Product[]; events: any[]; channels: any[]; discovery_ready: boolean; shopify_app_ready: boolean; ready_count: number; published_count: number; storage_mode?: string };
+type Overview = { settings: any; products: Product[]; events: any[]; channels: any[]; discovery_ready: boolean; shopify_app_ready: boolean; ready_count: number; published_count: number; storage_mode?: string; telegram_configured?: boolean };
 const money = (value: number | null | undefined, currency: string) => value == null ? "Add cost" : new Intl.NumberFormat("en-NG", { style: "currency", currency, maximumFractionDigits: 2 }).format(value);
 const emptyForm = { title:"", description:"", category:"General", model:"dropshipping", supplier_name:"", source_url:"", cost:"", shipping:"0", currency:"NGN", marketplace_fee_pct:"0", payment_fee_pct:"0", target_margin_pct:"25", stock_status:"unknown", source_verified:false, resale_authorized:false };
 
@@ -67,6 +68,8 @@ export default function CommerceAgent({ onNotice, onNavigate }: { onNotice?: (me
     {data?.storage_mode === "local_sqlite" && <div className="commerce-safety commerce-storage-warning"><AlertCircle size={17}/><span>The product catalog is using local SQLite storage. Configure DATABASE_URL for Neon before relying on product records across service restarts.</span></div>}
     {error&&<div className="commerce-error"><AlertCircle size={17}/>{error}{error.includes("Connect API")&&<button className="secondary" onClick={()=>onNavigate?.("Connect API")}>Open Connect API</button>}</div>}
     <div className="commerce-stats"><div><small>PRODUCT LEADS</small><b>{products.length}</b><span>Saved candidates</span></div><div><small>READY FOR CHANNEL</small><b>{data?.ready_count??0}</b><span>Passed your checks</span></div><div><small>SHOPIFY DRAFTS</small><b>{data?.published_count??0}</b><span>Unpublished until reviewed</span></div><div><small>NEW SOURCES</small><b>{data?.discovery_ready?"SEARCH ON":"KEY NEEDED"}</b><span>Online product discovery</span></div></div>
+
+    <CommerceInbox telegramConfigured={Boolean(data?.telegram_configured)} onNavigate={onNavigate}/>
 
     <div className="commerce-grid">
       <section className="panel commerce-panel"><div className="commerce-panel-head"><div><span className="commerce-eyebrow">PRODUCT DISCOVERY</span><h3>Scout suppliers across categories</h3></div><button className="secondary" onClick={()=>void load()} disabled={loading}><RefreshCw size={15} className={loading?"commerce-spin":""}/> Refresh</button></div>
