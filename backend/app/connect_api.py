@@ -44,6 +44,8 @@ SERVICES = [
         {"name":"elevenlabs_model","label":"Voice model","kind":"text","required":False,"help":"Default: eleven_multilingual_v2"}]},
     {"id":"commerce_search","name":"Product Discovery Search","group":"Commerce Agent","description":"Searches the web for supplier and product leads. Results are research leads, not proof of stock, pricing or resale rights.","testable":True,"fields":[
         {"name":"tavily_api_key","label":"Tavily Search API key","kind":"secret","required":True,"help":"Used by the Commerce Agent to search for current product and supplier pages."}]},
+    {"id":"commerce_cj","name":"CJ Dropshipping Supplier","group":"Commerce Agent","description":"Searches CJ's supplier catalog and checks reported warehouse inventory. Freight, destination eligibility, resale terms and payment must still be verified.","testable":True,"fields":[
+        {"name":"cj_api_key","label":"CJ API key","kind":"secret","required":True,"help":"Create an API key in your CJ account under Personal Center → API. AgentForge exchanges it for server-stored access tokens."}]},
     {"id":"commerce_shopify","name":"Shopify Store","group":"Commerce Agent","description":"Connect a Shopify app for a store you own. Product drafts are created only when you click the action in Commerce Agent.","testable":True,"fields":[
         {"name":"shopify_client_id","label":"Shopify app client ID","kind":"secret","required":True,"help":"From your Shopify Dev Dashboard app settings."},
         {"name":"shopify_client_secret","label":"Shopify app client secret","kind":"secret","required":True,"help":"Encrypted by AgentForge. Never paste it into chat."},
@@ -87,6 +89,7 @@ ENV_FALLBACKS = {
     "telegram_bot_token":"","telegram_chat_id":"",
     "elevenlabs_api_key":"","elevenlabs_voice_id":"","elevenlabs_model":"",
     "tavily_api_key":"","shopify_client_id":"","shopify_redirect_uri":"",
+    "cj_api_key":"",
     "jumia_seller_api_key":"","jumia_seller_api_base":"","jumia_seller_id":"",
     "paystack_secret_key":"PAYSTACK_SECRET_KEY","paystack_public_key":"",
     "paystack_pro_monthly_plan_code":"PAYSTACK_PRO_MONTHLY_PLAN_CODE","paystack_business_monthly_plan_code":"PAYSTACK_BUSINESS_MONTHLY_PLAN_CODE",
@@ -256,6 +259,11 @@ async def test_connection(service_id: str):
                     json={"query":"wholesale suppliers Nigeria test","search_depth":"basic","max_results":1,"include_answer":False})
             if response.status_code>=400: raise HTTPException(502,"Tavily rejected the search key or request.")
             message="Tavily search request succeeded. This test uses one search request."
+        elif service_id=="commerce_cj":
+            if not read_secret("cj_api_key"): raise HTTPException(409,"Add the CJ API key first.")
+            from .commerce_agent import test_cj_connection
+            result=await test_cj_connection()
+            message=result["message"]
         elif service_id=="commerce_shopify":
             if not (read_secret("shopify_client_id") and read_secret("shopify_client_secret") and read_secret("shopify_redirect_uri")):
                 raise HTTPException(409,"Add the Shopify app client ID, secret and redirect URL first.")
