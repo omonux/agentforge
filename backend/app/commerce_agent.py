@@ -1,6 +1,7 @@
 """Private, approval-gated multi-channel commerce workspace."""
 import json
 import os
+import asyncio
 import hashlib
 import hmac
 import re
@@ -10,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import httpx
 import psycopg
@@ -24,6 +25,7 @@ from .main import db as sqlite_db, stamp
 
 router = APIRouter(prefix="/api/v1/commerce", tags=["Commerce Agent"])
 SHOPIFY_API_VERSION = "2026-10"
+CJ_API_BASE = "https://developers.cjdropshipping.com/api2.0/v1"
 
 
 class _PostgresAdapter:
@@ -81,6 +83,17 @@ def ensure_tables():
             created TEXT NOT NULL, updated TEXT NOT NULL)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS commerce_intake_rate (
             id TEXT PRIMARY KEY, address_hash TEXT NOT NULL, created TEXT NOT NULL)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS commerce_supplier_product_refs (
+            supplier TEXT NOT NULL, external_id TEXT NOT NULL, commerce_product_id TEXT NOT NULL UNIQUE,
+            created TEXT NOT NULL, updated TEXT NOT NULL, PRIMARY KEY(supplier,external_id))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS commerce_asset_listings (
+            id TEXT PRIMARY KEY, asset_type TEXT NOT NULL, title TEXT NOT NULL, location TEXT NOT NULL,
+            asking_price REAL NOT NULL, currency TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
+            source_url TEXT NOT NULL DEFAULT '', authorized_to_market INTEGER NOT NULL DEFAULT 0,
+            copy_json TEXT, status TEXT NOT NULL DEFAULT 'draft', created TEXT NOT NULL, updated TEXT NOT NULL)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS commerce_asset_research (
+            id TEXT PRIMARY KEY, asset_type TEXT NOT NULL, query TEXT NOT NULL, location TEXT NOT NULL,
+            currency TEXT NOT NULL, sources_json TEXT NOT NULL, created TEXT NOT NULL)""")
 
 
 def event(event_type: str, message: str, product_id: str | None = None):
@@ -107,6 +120,104 @@ def _shopify_config():
     return shop, token
 
 
+def _cj_store_tokens(data: dict):
+    access=data.get("accessToken")
+    refresh=data.get("refreshToken")
+    if isinstance(access,str) and access:
+        store_secret("cj_access_token",access)
+        if data.get("accessTokenExpiryDate"):
+            store_secret("cj_access_token_expiry",str(data["accessTokenExpiryDate"]))
+    if isinstance(refresh,str) and refresh:
+        store_secret("cj_refresh_token",refresh)
+        if data.get("refreshTokenExpiryDate"):
+            store_secret("cj_refresh_token_expiry",str(data["refreshTokenExpiryDate"]))
+    return access
+
+
+async def _cj_access_token(force_refresh=False):
+    api_key=read_secret("cj_api_key")
+    if not api_key:
+        raise HTTPException(409,"Add your CJ API key in Connect API and test the connection first.")
+    access=read_secret("cj_access_token")
+    refresh=read_secret("cj_refresh_token")
+    expiry=read_secret("cj_access_token_expiry")
+    access_valid=False
+    if access and expiry:
+        try:
+            parsed=datetime.fromisoformat(expiry.replace("Z","+00:00"))
+            if parsed.tzinfo is None: parsed=parsed.replace(tzinfo=timezone.utc)
+            access_valid=parsed>datetime.now(timezone.utc)+timedelta(minutes=5)
+        except ValueError:
+            access_valid=False
+    if access_valid and not force_refresh:
+        return access
+    async with httpx.AsyncClient(timeout=25) as client:
+        if refresh:
+            try:
+                response=await client.post(CJ_API_BASE+"/authentication/refreshAccessToken",json={"refreshToken":refresh})
+                body=response.json()
+                data=body.get("data") or {}
+                if response.status_code<400 and body.get("result") and data.get("accessToken"):
+                    return _cj_store_tokens(data)
+            except (httpx.RequestError,ValueError):
+                pass
+        try:
+            response=await client.post(CJ_API_BASE+"/authentication/getAccessToken",json={"apiKey":api_key})
+        except httpx.RequestError:
+            raise HTTPException(502,"Could not reach CJ Dropshipping authentication.")
+    if response.status_code>=400:
+        raise HTTPException(502,"CJ Dropshipping rejected the API key. Check it in Connect API.")
+    try:
+        body=response.json()
+    except ValueError:
+        raise HTTPException(502,"CJ Dropshipping returned an unreadable authentication response.")
+    data=body.get("data") or {}
+    if not body.get("result") or not data.get("accessToken"):
+        raise HTTPException(502,"CJ Dropshipping did not issue an access token. Check the API key and account status.")
+    return _cj_store_tokens(data)
+
+
+async def _cj_request(path: str, *, params=None):
+    token=await _cj_access_token()
+    try:
+        async with httpx.AsyncClient(timeout=30,follow_redirects=False) as client:
+            response=await client.get(CJ_API_BASE+path,headers={"CJ-Access-Token":token},params=params)
+    except httpx.RequestError:
+        raise HTTPException(502,"Could not reach the CJ Dropshipping API.")
+    if response.status_code in (401,403):
+        raise HTTPException(502,"CJ access token was rejected. Re-test the CJ connection in Connect API.")
+    if response.status_code>=400:
+        raise HTTPException(502,f"CJ Dropshipping returned HTTP {response.status_code}.")
+    try:
+        body=response.json()
+    except ValueError:
+        raise HTTPException(502,"CJ Dropshipping returned an unreadable response.")
+    if body.get("code") not in (None,200) or body.get("result") is False or body.get("success") is False:
+        raise HTTPException(502,"CJ Dropshipping rejected the request: "+str(body.get("message") or "check the API account and request details")[:220])
+    return body.get("data")
+
+
+async def test_cj_connection():
+    token=await _cj_access_token(force_refresh=True)
+    # The settings endpoint confirms the issued token can access the authenticated API.
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response=await client.get(CJ_API_BASE+"/setting/get",headers={"CJ-Access-Token":token})
+    except httpx.RequestError:
+        raise HTTPException(502,"Could not reach CJ Dropshipping after authentication.")
+    if response.status_code>=400:
+        raise HTTPException(502,"CJ accepted authentication but rejected the account settings check.")
+    try: body=response.json()
+    except ValueError: raise HTTPException(502,"CJ returned an unreadable settings response.")
+    if body.get("result") is False or body.get("success") is False or body.get("code") not in (None,200):
+        raise HTTPException(502,"CJ authentication succeeded but the account check failed.")
+    with commerce_db() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS integration_checks(service TEXT PRIMARY KEY,status TEXT NOT NULL,message TEXT NOT NULL,checked_at TEXT NOT NULL)")
+        conn.execute("INSERT INTO integration_checks(service,status,message,checked_at) VALUES('commerce_cj','connected',?,?) ON CONFLICT(service) DO UPDATE SET status=excluded.status,message=excluded.message,checked_at=excluded.checked_at",
+                     ("CJ API authentication and account check succeeded.",stamp()))
+    return {"connected":True,"message":"CJ API authentication and account check succeeded. Product lookup is ready; shipping and order payment are not enabled."}
+
+
 class ProductInput(BaseModel):
     title: str = Field(min_length=3, max_length=180)
     description: str = Field(default="", max_length=8000)
@@ -123,6 +234,7 @@ class ProductInput(BaseModel):
     stock_status: str = Field(default="unknown", pattern="^(unknown|available|unavailable|affiliate)$")
     source_verified: bool = False
     resale_authorized: bool = False
+    shipping_verified: bool = False
 
     @field_validator("source_url")
     @classmethod
@@ -175,6 +287,49 @@ class DiscoveryInput(BaseModel):
     query: str = Field(default="", max_length=180)
 
 
+class CjSearchInput(BaseModel):
+    query: str = Field(min_length=2, max_length=120)
+    country_code: str = Field(default="NG", pattern="^(|[A-Z]{2})$")
+    size: int = Field(default=12, ge=1, le=20)
+
+
+class AssetResearchInput(BaseModel):
+    asset_type: str = Field(pattern="^(vehicle|property)$")
+    query: str = Field(min_length=2, max_length=180)
+    location: str = Field(min_length=2, max_length=120)
+    currency: str = Field(default="NGN", pattern="^(NGN|USD|GBP|EUR)$")
+
+
+class AssetListingInput(BaseModel):
+    asset_type: str = Field(pattern="^(vehicle|property)$")
+    title: str = Field(min_length=3, max_length=180)
+    location: str = Field(min_length=2, max_length=180)
+    asking_price: Decimal = Field(gt=0, le=Decimal("1000000000000"))
+    currency: str = Field(default="NGN", pattern="^(NGN|USD|GBP|EUR)$")
+    details: dict[str, str] = Field(default_factory=dict)
+    source_url: str = Field(default="", max_length=1000)
+    authorized_to_market: bool = False
+
+    @field_validator("source_url")
+    @classmethod
+    def valid_asset_source_url(cls, value):
+        value=value.strip()
+        if value and (urlparse(value).scheme not in ("http","https") or not urlparse(value).hostname):
+            raise ValueError("Source URL must be a valid http or https address.")
+        return value
+
+    @field_validator("details")
+    @classmethod
+    def bound_asset_details(cls, value):
+        if len(value)>20: raise ValueError("Use no more than 20 verified listing facts.")
+        cleaned={}
+        for key,val in value.items():
+            key=str(key).strip()[:60]
+            val=str(val).strip()[:500]
+            if key and val: cleaned[key]=val
+        return cleaned
+
+
 class ShopifyConnectInput(BaseModel):
     shop: str = Field(min_length=1, max_length=100)
 
@@ -216,7 +371,7 @@ def overview():
         products = conn.execute("SELECT * FROM commerce_products ORDER BY updated DESC LIMIT 100").fetchall()
         events = conn.execute("SELECT * FROM commerce_events ORDER BY created DESC LIMIT 30").fetchall()
         conn.execute("CREATE TABLE IF NOT EXISTS integration_checks(service TEXT PRIMARY KEY,status TEXT NOT NULL,message TEXT NOT NULL,checked_at TEXT NOT NULL)")
-        checks = {row["service"]: row["status"] for row in conn.execute("SELECT service,status FROM integration_checks WHERE service IN ('commerce_shopify','commerce_jumia')").fetchall()}
+        checks = {row["service"]: row["status"] for row in conn.execute("SELECT service,status FROM integration_checks WHERE service IN ('commerce_shopify','commerce_jumia','commerce_cj')").fetchall()}
     all_products = [_row_product(row) for row in products]
     return {
         "settings": {**settings, "daily_scan_enabled": bool(settings["daily_scan_enabled"]), "auto_publish": bool(settings["auto_publish"])},
@@ -225,17 +380,257 @@ def overview():
         "storage_mode": "neon_postgres" if os.getenv("DATABASE_URL","").strip() else "local_sqlite",
         "channels": [
             {"id": "shopify", "name": "Shopify", "status": "configured" if checks.get("commerce_shopify")=="connected" else ("credentials_saved" if shop and token else "not_connected"), "shop": shop or None, "supported": True},
+            {"id": "cj", "name": "CJ Dropshipping supplier", "status": "connected" if checks.get("commerce_cj")=="connected" else ("credentials_saved" if read_secret("cj_api_key") else "not_connected"), "supported": True, "detail": "Supplier catalog and inventory lookup; no automatic supplier payment or fulfillment."},
             {"id": "jumia", "name": "Jumia", "status": "manual_setup", "supported": False, "detail": "Credentials are saved for account-specific setup; automated listing is not yet verified." if read_secret("jumia_seller_api_key") else "Seller API setup is account-specific; no credentials are connected yet."},
             {"id": "jiji", "name": "Jiji", "status": "manual_setup", "supported": False, "detail": "Use copy-ready listings until an approved seller API is available."},
             {"id": "affiliate", "name": "Affiliate networks", "status": "not_connected", "supported": False},
             {"id": "freelance", "name": "Freelance marketplaces", "status": "not_connected", "supported": False},
         ],
         "discovery_ready": tavily,
+        "cj_configured": bool(read_secret("cj_api_key")),
         "shopify_app_ready": bool(read_secret("shopify_client_id") and read_secret("shopify_client_secret") and read_secret("shopify_redirect_uri")),
         "telegram_configured": bool(read_secret("telegram_bot_token") and read_secret("telegram_chat_id")),
         "ready_count": sum(1 for p in all_products if p["status"] == "ready"),
         "published_count": sum(1 for p in all_products if p["status"] in ("shopify_draft", "published")),
     }
+
+
+@router.post("/cj/products/search")
+async def search_cj_products(item: CjSearchInput):
+    """Search the connected CJ catalog. Results are leads, never auto-listed."""
+    ensure_tables()
+    params={"page":1,"size":item.size,"keyWord":item.query.strip(),"startWarehouseInventory":1,
+            "verifiedWarehouse":1,"orderBy":0,"sort":"desc"}
+    if item.country_code:
+        params["countryCode"]=item.country_code
+    data=await _cj_request("/product/listV2",params=params)
+    blocks=data.get("content",[]) if isinstance(data,dict) else []
+    products=[]
+    if isinstance(data,dict) and isinstance(data.get("productList"),list):
+        products.extend(data["productList"])
+    for block in blocks if isinstance(blocks,list) else []:
+        if isinstance(block,dict) and isinstance(block.get("productList"),list):
+            products.extend(block["productList"])
+    results=[]
+    for product in products[:item.size]:
+        pid=str(product.get("id") or product.get("pid") or "").strip()
+        title=str(product.get("nameEn") or product.get("productNameEn") or "").strip()[:180]
+        if not pid or not title: continue
+        price=product.get("nowPrice") or product.get("discountPrice") or product.get("sellPrice")
+        try: price=float(price) if price not in (None,"") else None
+        except (TypeError,ValueError): price=None
+        results.append({"id":pid,"title":title,"sku":str(product.get("sku") or product.get("productSku") or ""),
+            "price_usd":price,"image":str(product.get("bigImage") or product.get("productImage") or ""),
+            "category":str(product.get("threeCategoryName") or product.get("categoryName") or "General"),
+            "warehouse_inventory":int(product.get("totalVerifiedInventory") or product.get("warehouseInventoryNum") or 0),
+            "supplier":str(product.get("supplierName") or "CJ Dropshipping")})
+    event("cj_product_search",f"Searched CJ supplier catalog for '{item.query.strip()}'; {len(results)} catalog results returned.")
+    return {"query":item.query.strip(),"country_code":item.country_code or "any","products":results,
+        "message":"CJ catalog prices and warehouse inventory are live lookup data. They do not confirm shipping cost or delivery to the buyer's address."}
+
+
+@router.post("/cj/products/{product_id}/import")
+async def import_cj_product(product_id: str, country_code: str = "NG"):
+    """Import a fresh supplier snapshot into the research catalog; never creates a listing."""
+    ensure_tables()
+    if not re.fullmatch(r"[A-Za-z0-9-]{5,80}",product_id):
+        raise HTTPException(422,"CJ product ID is not valid.")
+    if country_code and not re.fullmatch(r"[A-Z]{2}",country_code):
+        raise HTTPException(422,"Use a two-letter destination or warehouse country code.")
+    with commerce_db() as conn:
+        prior=conn.execute("SELECT commerce_product_id FROM commerce_supplier_product_refs WHERE supplier='cj' AND external_id=?",(product_id,)).fetchone()
+    if prior:
+        return {"imported":False,"product_id":prior["commerce_product_id"],"message":"This CJ product is already in your product catalog."}
+    detail_params={"pid":product_id}
+    if country_code: detail_params["countryCode"]=country_code
+    detail=await _cj_request("/product/query",params=detail_params)
+    if not isinstance(detail,dict) or str(detail.get("pid") or "")!=product_id:
+        raise HTTPException(404,"CJ did not return that product for the selected country.")
+    inventory_data=await _cj_request("/product/stock/getInventoryByPid",params={"pid":product_id})
+    warehouses=(inventory_data or {}).get("inventories",[]) if isinstance(inventory_data,dict) else []
+    variants=(inventory_data or {}).get("variantInventories",[]) if isinstance(inventory_data,dict) else []
+    if country_code:
+        warehouses=[w for w in warehouses if w.get("countryCode")==country_code]
+    cj_stock=sum(int(w.get("cjInventoryNum") or 0) for w in warehouses)
+    # Factory inventory is deliberately excluded: it is not the supplier's own ready stock.
+    price=detail.get("sellPrice")
+    try: cost=float(price) if price not in (None,"") else None
+    except (TypeError,ValueError): cost=None
+    title=str(detail.get("productNameEn") or "CJ supplier product").strip()[:180]
+    sku=str(detail.get("productSku") or "").strip()
+    category=str(detail.get("categoryName") or "General").strip()[:100]
+    description=str(detail.get("description") or "").strip()[:7000]
+    fact_lines=[f"CJ product ID: {product_id}"]
+    if sku: fact_lines.append(f"CJ SKU: {sku}")
+    fact_lines.append(f"Warehouse country checked: {country_code or 'all returned warehouses'}")
+    fact_lines.append(f"CJ-managed stock reported: {cj_stock}")
+    if detail.get("productWeight"): fact_lines.append(f"Supplier-reported product weight: {detail['productWeight']} g")
+    if detail.get("deliveryCycle"): fact_lines.append(f"Supplier-reported delivery cycle: {detail['deliveryCycle']} days; confirm destination-specific shipping")
+    if description: fact_lines.append("Supplier description (review before using): " + description)
+    variant_count=len(detail.get("variants") or [])
+    fact_lines.append(f"Variants returned: {variant_count}; choose and verify a sellable variant before listing")
+    now=stamp(); ident=str(uuid.uuid4())
+    with commerce_db() as conn:
+        conn.execute("""INSERT INTO commerce_products(id,title,description,category,model,supplier_name,source_url,cost,shipping,currency,
+          target_margin_pct,stock_status,source_verified,resale_authorized,status,channel_ids_json,created,updated)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          (ident,title,"\n".join(fact_lines),category,"dropshipping","CJ Dropshipping","https://www.cjdropshipping.com/",cost,0,"USD",
+           25,"available" if cj_stock>0 else "unknown",0,0,"candidate",
+           json.dumps({"_supplier":{"provider":"cj","product_id":product_id,"sku":sku,"country_code":country_code,
+             "cj_stock":cj_stock,"variant_count":variant_count,"checked_at":now,"image":str(detail.get("bigImage") or "")}}),now,now))
+        conn.execute("INSERT INTO commerce_supplier_product_refs(supplier,external_id,commerce_product_id,created,updated) VALUES('cj',?,?,?,?)",
+                     (product_id,ident,now,now))
+    event("cj_product_imported",f"Imported CJ catalog lead '{title}' ({product_id}); shipping, variant, resale terms and margin remain unverified.",ident)
+    return {"imported":True,"product_id":ident,"title":title,"cj_product_id":product_id,"cj_stock":cj_stock,
+      "warehouse_country":country_code or "all returned warehouses","variant_count":variant_count,
+      "message":"Added as a research lead. Verify destination freight, variant price, resale terms and final margin before approving a Shopify draft."}
+
+
+_ASKING_PRICE_TEXT=re.compile(r"(?:₦\s*|NGN\s*|\bN\s*)(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:\s*(?:million|m|k))?",re.IGNORECASE)
+
+
+@router.post("/assets/research")
+async def research_asset_market(item: AssetResearchInput):
+    """Find multiple public comparable listings; asking prices are not valuations."""
+    ensure_tables()
+    key=read_secret("tavily_api_key")
+    if not key: raise HTTPException(409,"Add the Tavily Search API key in Connect API to research vehicle and property listings.")
+    kind="cars" if item.asset_type=="vehicle" else "houses and property"
+    query=item.query.strip(); location=item.location.strip()
+    searches=[
+        f"{query} {kind} for sale price {location}",
+        f"{query} {kind} current listings asking prices {location}",
+        f"{kind} comparable sale listings {query} around {location} {item.currency}",
+    ]
+    async def search(client,term):
+        response=await client.post("https://api.tavily.com/search",headers={"Authorization":"Bearer "+key},json={
+            "query":term,"search_depth":"basic","max_results":5,"include_answer":False,"include_raw_content":False})
+        if response.status_code>=400: raise HTTPException(502,"The market research provider rejected one of the comparable searches.")
+        return response.json().get("results",[])
+    try:
+        async with httpx.AsyncClient(timeout=35) as client:
+            groups=await asyncio.gather(*(search(client,term) for term in searches),return_exceptions=True)
+    except httpx.RequestError:
+        raise HTTPException(502,"Could not reach the market research provider.")
+    sources=[]; seen=set(); failures=0
+    for group in groups:
+        if isinstance(group,Exception):
+            failures+=1
+            continue
+        for result in group:
+            url=str(result.get("url") or "").strip()
+            title=str(result.get("title") or "").strip()[:220]
+            if not url or not title or url in seen or urlparse(url).scheme not in ("http","https"): continue
+            seen.add(url)
+            snippet=str(result.get("content") or "").strip()[:1200]
+            text_to_scan=(title+" "+snippet)
+            mentions=[]
+            for match in _ASKING_PRICE_TEXT.finditer(text_to_scan):
+                val=match.group(0).strip()
+                if val not in mentions: mentions.append(val)
+            sources.append({"title":title,"url":url,"domain":urlparse(url).hostname or "",
+                "snippet":snippet,"price_text_found":mentions[:5],"search_score":result.get("score")})
+    if not sources and failures==len(searches):
+        raise HTTPException(502,"All market searches failed. Check the provider connection and try again.")
+    sources=sources[:15]
+    ident=str(uuid.uuid4()); now=stamp()
+    with commerce_db() as conn:
+        conn.execute("INSERT INTO commerce_asset_research(id,asset_type,query,location,currency,sources_json,created) VALUES(?,?,?,?,?,?,?)",
+          (ident,item.asset_type,query,location,item.currency,json.dumps(sources),now))
+    event("asset_market_research",f"Collected {len(sources)} public {kind} comparable pages for {location}; asking prices are unverified examples.")
+    return {"id":ident,"asset_type":item.asset_type,"query":query,"location":location,"currency":item.currency,
+        "sources":sources,"search_count":len(searches)-failures,
+        "message":"These are public asking-price examples, not verified sale prices or a professional valuation. Check each listing’s date, condition, location and source before setting your price."}
+
+
+@router.get("/assets/listings")
+def list_asset_marketing_drafts():
+    ensure_tables()
+    with commerce_db() as conn:
+        rows=conn.execute("SELECT * FROM commerce_asset_listings ORDER BY updated DESC LIMIT 100").fetchall()
+    result=[]
+    for row in rows:
+        item=dict(row)
+        item["authorized_to_market"]=bool(item["authorized_to_market"])
+        item["details"]=json.loads(item.pop("details_json") or "{}")
+        item["marketing_copy"]=json.loads(item.pop("copy_json")) if item.get("copy_json") else None
+        item.pop("copy_json",None)
+        result.append(item)
+    return result
+
+
+@router.get("/assets/research")
+def list_asset_research():
+    ensure_tables()
+    with commerce_db() as conn:
+        rows=conn.execute("SELECT * FROM commerce_asset_research ORDER BY created DESC LIMIT 30").fetchall()
+    result=[]
+    for row in rows:
+        item=dict(row)
+        item["sources"]=json.loads(item.pop("sources_json") or "[]")
+        result.append(item)
+    return result
+
+
+@router.post("/assets/listings")
+def create_asset_marketing_draft(item: AssetListingInput):
+    ensure_tables()
+    detail_keys={key.lower() for key in item.details}
+    if item.asset_type=="vehicle" and not all(k in detail_keys for k in ("make","model","year")):
+        raise HTTPException(422,"Add verified car make, model and year in listing facts.")
+    if item.asset_type=="property" and not ("bedrooms" in detail_keys and ("property_type" in detail_keys or "property type" in detail_keys)):
+        raise HTTPException(422,"Add verified property type and bedroom count in listing facts.")
+    ident=str(uuid.uuid4()); now=stamp()
+    with commerce_db() as conn:
+        conn.execute("""INSERT INTO commerce_asset_listings(id,asset_type,title,location,asking_price,currency,details_json,source_url,authorized_to_market,status,created,updated)
+          VALUES(?,?,?,?,?,?,?,?,?,'draft',?,?)""",
+          (ident,item.asset_type,item.title.strip(),item.location.strip(),float(item.asking_price),item.currency,
+           json.dumps(item.details),item.source_url,int(item.authorized_to_market),now,now))
+    event("asset_listing_saved",f"Saved {item.asset_type} marketing draft: {item.title.strip()}.")
+    return {"id":ident,"status":"draft","message":"Saved as a private draft. It has not been published or sent to a marketplace."}
+
+
+@router.post("/assets/listings/{listing_id}/copy")
+async def draft_asset_marketing_copy(listing_id: str):
+    ensure_tables()
+    with commerce_db() as conn:
+        row=conn.execute("SELECT * FROM commerce_asset_listings WHERE id=?",(listing_id,)).fetchone()
+    if not row: raise HTTPException(404,"Vehicle or property draft was not found.")
+    if not row["authorized_to_market"]:
+        raise HTTPException(409,"Confirm you own this asset or have the owner’s permission before preparing marketing copy.")
+    facts={"asset_type":row["asset_type"],"title":row["title"],"location":row["location"],
+        "asking_price":row["asking_price"],"currency":row["currency"],"verified_details":json.loads(row["details_json"] or "{}"),
+        "source_url":row["source_url"]}
+    from .main import ask
+    prompt=("Write factual marketing copy for this authorized vehicle or property listing. Use only supplied facts. "
+      "Do not invent condition, ownership, title/deed status, inspection, mileage, features, amenities, legal status, discounts, availability, "
+      "investment returns, guarantees, or contact details. Include the asking price exactly as supplied. If facts are missing, omit them. "
+      "Return valid JSON with string fields headline, description, short_caption, and facts_to_confirm. "
+      "facts_to_confirm should list important information absent from the supplied details, or be an empty string.\nFACTS:\n"+
+      json.dumps(facts,ensure_ascii=False))
+    raw=await ask("sales",prompt)
+    try:
+        clean=raw.strip()
+        if clean.startswith("```"): clean=clean.strip("`").removeprefix("json").strip()
+        copy=json.loads(clean)
+        if not all(isinstance(copy.get(k),str) for k in ("headline","description","short_caption","facts_to_confirm")): raise ValueError()
+    except (ValueError,TypeError):
+        raise HTTPException(502,"AI returned an unexpected marketing-copy format. Try again.")
+    now=stamp()
+    with commerce_db() as conn:
+        conn.execute("UPDATE commerce_asset_listings SET copy_json=?,updated=? WHERE id=?",(json.dumps(copy),now,listing_id))
+    event("asset_marketing_copy_drafted",f"Drafted owner-authorized {row['asset_type']} marketing copy for {row['title']}.")
+    return {"id":listing_id,"marketing_copy":copy,"published":False,"message":"Marketing copy is saved as a private draft. Review all claims before posting."}
+
+
+@router.delete("/assets/listings/{listing_id}")
+def delete_asset_marketing_draft(listing_id: str):
+    ensure_tables()
+    with commerce_db() as conn:
+        changed=conn.execute("DELETE FROM commerce_asset_listings WHERE id=?",(listing_id,))
+    if changed.rowcount!=1: raise HTTPException(404,"Vehicle or property draft was not found.")
+    event("asset_listing_deleted","Removed a private vehicle or property marketing draft.")
+    return {"deleted":True}
 
 
 @router.post("/public/inquiries")
@@ -389,7 +784,8 @@ def create_product(item: ProductInput):
     with commerce_db() as conn:
         settings = conn.execute("SELECT target_margin_pct,currency,min_profit FROM commerce_settings WHERE id=1").fetchone()
     target_margin = item.target_margin_pct if item.target_margin_pct is not None else Decimal(str(settings["target_margin_pct"]))
-    sale, profit = _price(item.cost, item.shipping, item.marketplace_fee_pct, item.payment_fee_pct, target_margin, settings["min_profit"])
+    floor=settings["min_profit"] if item.currency==settings["currency"] else 0
+    sale, profit = _price(item.cost, item.shipping, item.marketplace_fee_pct, item.payment_fee_pct, target_margin, floor)
     now, ident = stamp(), str(uuid.uuid4())
     status = "candidate"
     with commerce_db() as conn:
@@ -408,18 +804,24 @@ def create_product(item: ProductInput):
 def update_product(product_id: str, item: ProductInput):
     ensure_tables()
     with commerce_db() as conn:
-        old = conn.execute("SELECT status FROM commerce_products WHERE id=?",(product_id,)).fetchone()
-        settings=conn.execute("SELECT min_profit FROM commerce_settings WHERE id=1").fetchone()
+        old = conn.execute("SELECT status,channel_ids_json FROM commerce_products WHERE id=?",(product_id,)).fetchone()
+        settings=conn.execute("SELECT min_profit,currency FROM commerce_settings WHERE id=1").fetchone()
     if not old: raise HTTPException(404,"Product was not found.")
     if old["status"] in ("shopify_draft","published"): raise HTTPException(409,"This product has already been sent to a channel. Pause it there before editing the source record.")
-    sale, profit = _price(item.cost,item.shipping,item.marketplace_fee_pct,item.payment_fee_pct,item.target_margin_pct,settings["min_profit"])
+    floor=settings["min_profit"] if item.currency==settings["currency"] else 0
+    sale, profit = _price(item.cost,item.shipping,item.marketplace_fee_pct,item.payment_fee_pct,item.target_margin_pct,floor)
+    channels=json.loads(old["channel_ids_json"] or "{}")
+    supplier=channels.get("_supplier")
+    if isinstance(supplier,dict) and supplier.get("provider")=="cj":
+        supplier["shipping_verified"]=bool(item.shipping_verified)
+        channels["_supplier"]=supplier
     with commerce_db() as conn:
         conn.execute("""UPDATE commerce_products SET title=?,description=?,category=?,model=?,supplier_name=?,source_url=?,cost=?,shipping=?,
         currency=?,marketplace_fee_pct=?,payment_fee_pct=?,target_margin_pct=?,sale_price=?,estimated_profit=?,stock_status=?,source_verified=?,
-        resale_authorized=?,status='candidate',updated=? WHERE id=?""",
+        resale_authorized=?,channel_ids_json=?,status='candidate',updated=? WHERE id=?""",
         (item.title.strip(),item.description.strip(),item.category.strip(),item.model,item.supplier_name.strip(),item.source_url,
          float(item.cost) if item.cost is not None else None,float(item.shipping),item.currency,float(item.marketplace_fee_pct),
-         float(item.payment_fee_pct),float(item.target_margin_pct),sale,profit,item.stock_status,int(item.source_verified),int(item.resale_authorized),stamp(),product_id))
+         float(item.payment_fee_pct),float(item.target_margin_pct),sale,profit,item.stock_status,int(item.source_verified),int(item.resale_authorized),json.dumps(channels),stamp(),product_id))
     event("product_updated",f"Updated {item.title.strip()}.",product_id)
     with commerce_db() as conn: row=conn.execute("SELECT * FROM commerce_products WHERE id=?",(product_id,)).fetchone()
     return _row_product(row)
@@ -440,15 +842,20 @@ def approve_product(product_id: str):
     ensure_tables()
     with commerce_db() as conn:
         product=conn.execute("SELECT * FROM commerce_products WHERE id=?",(product_id,)).fetchone()
-        settings=conn.execute("SELECT min_profit FROM commerce_settings WHERE id=1").fetchone()
+        settings=conn.execute("SELECT min_profit,currency FROM commerce_settings WHERE id=1").fetchone()
     if not product: raise HTTPException(404,"Product was not found.")
     if product["model"] in ("affiliate", "freelance"):
         raise HTTPException(409,"Affiliate and freelance opportunities can be researched and drafted, but automated channel approval is not available until their network-specific terms and publishing API are connected.")
     if not product["source_verified"]: raise HTTPException(409,"Verify the supplier/source, stock and product facts first.")
     if product["model"] not in ("affiliate",) and not product["resale_authorized"]: raise HTTPException(409,"Confirm that the supplier permits resale before approving this product.")
     if product["model"] != "affiliate" and product["stock_status"] != "available": raise HTTPException(409,"Confirm current stock before approving this product.")
+    channels=json.loads(product["channel_ids_json"] or "{}")
+    supplier=channels.get("_supplier") or {}
+    if supplier.get("provider")=="cj" and not supplier.get("shipping_verified"):
+        raise HTTPException(409,"Confirm the destination shipping quote and delivery eligibility before approving this CJ product.")
     if product["sale_price"] is None or product["estimated_profit"] is None: raise HTTPException(409,"Add product cost and shipping before approving it.")
-    if float(product["estimated_profit"]) < float(settings["min_profit"]): raise HTTPException(409,"Estimated profit is below your minimum-profit setting.")
+    min_profit=float(settings["min_profit"]) if product["currency"]==settings["currency"] else 0
+    if float(product["estimated_profit"]) < min_profit: raise HTTPException(409,"Estimated profit is below your minimum-profit setting.")
     with commerce_db() as conn:
         conn.execute("UPDATE commerce_products SET status='ready',updated=? WHERE id=?",(stamp(),product_id))
     event("product_approved",f"Approved {product['title']} for a channel draft.",product_id)
@@ -620,6 +1027,9 @@ async def create_shopify_draft(product_id: str):
     if not row: raise HTTPException(404,"Product was not found.")
     if row["status"] != "ready": raise HTTPException(409,"Approve the verified product before creating a Shopify draft.")
     if not row["source_verified"] or (row["model"] != "affiliate" and not row["resale_authorized"]): raise HTTPException(409,"Verify the product source and resale permission first.")
+    supplier=json.loads(row["channel_ids_json"] or "{}").get("_supplier") or {}
+    if supplier.get("provider")=="cj" and not supplier.get("shipping_verified"):
+        raise HTTPException(409,"Verify destination shipping and delivery eligibility before creating a Shopify draft.")
     if row["sale_price"] is None or row["estimated_profit"] is None or row["estimated_profit"] < settings["min_profit"]: raise HTTPException(409,"The calculated selling price does not meet your minimum-profit rule.")
     if row["model"] != "affiliate" and row["stock_status"] != "available": raise HTTPException(409,"Confirm stock is currently available before creating a listing.")
     channels=json.loads(row["channel_ids_json"] or "{}")
