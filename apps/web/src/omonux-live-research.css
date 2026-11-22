@@ -1,0 +1,21 @@
+.omx-live-research{margin-top:18px}
+.omx-live-research .portfoliohead{gap:12px;flex-wrap:wrap}
+.omx-live-research .portfoliohead h3{margin:0 0 4px}
+.omx-live-notice{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;border:1px solid #3a4962;background:#111d2b;color:#c5d7ed;border-radius:9px;font-size:12px;line-height:1.55;margin:10px 0 14px}
+.omx-live-notice svg{flex:none;color:#80d6b8;margin-top:1px}
+.omx-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:12px}
+.omx-live-card{min-width:0;border:1px solid #293951;background:#0f1827;border-radius:10px;padding:14px}
+.omx-live-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.omx-live-market{font-size:8px;letter-spacing:1px;color:#9a8eff;font-weight:800}
+.omx-live-card h4{margin:4px 0 0;font-size:15px;color:#f1f5fc}
+.omx-live-status{display:inline-flex;align-items:center;gap:5px;border-radius:99px;padding:6px 9px;font-size:9px;font-weight:800;letter-spacing:.4px}
+.omx-live-status.buy{color:#86e0ba;background:#16392f}.omx-live-status.sell{color:#ffb2aa;background:#462a32}.omx-live-status.hold,.omx-live-status.unavailable{color:#f2d18e;background:#3a311e}
+.omx-live-levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:15px}
+.omx-live-levels>div{min-width:0;border-top:1px solid #26344a;padding-top:8px}
+.omx-live-levels small,.omx-live-levels b{display:block}.omx-live-levels small{color:#8e9db4;font-size:9px}.omx-live-levels b{color:#edf3fc;font-size:12px;margin-top:5px;overflow-wrap:anywhere}
+.omx-live-note{font-size:10px;line-height:1.5;color:#b0bfd2;margin:11px 0 7px}
+.omx-live-source,.omx-live-updated{font-size:9px;color:#8291a8;line-height:1.5;overflow-wrap:anywhere}
+.omx-live-error{font-size:10px;line-height:1.5;color:#ffbbad;overflow-wrap:anywhere}
+.omx-live-empty{grid-column:1/-1;text-align:center;padding:24px;color:#9aa9bf;font-size:12px}
+.omx-live-updated{display:block;margin-top:12px}
+@media(max-width:520px){.omx-live-levels{gap:5px}.omx-live-levels b{font-size:10px}}
