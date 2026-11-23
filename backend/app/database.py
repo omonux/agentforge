@@ -36,6 +36,8 @@ class HybridRow:
 
 
 def _row_factory(cursor):
+    if cursor.description is None:
+        return tuple
     names = tuple(col.name for col in cursor.description)
     return lambda values: HybridRow(names, values)
 
