@@ -78,19 +78,11 @@ Keep `LIVE_TRADING_ENABLED=false` and `BYBIT_LIVE_TRADING_ENABLED=false` for lau
 
 ## Render deployment
 
-The Blueprint provisions a paid Starter web service and a 1 GB persistent disk mounted at `/data`. SQLite uses `/data/agentforge.db`; the service is single-instance. Review current pricing and regional availability in Render before provisioning.
+The running workspace should use a private Neon `DATABASE_URL` set in the Render service environment. The backend reads it server-side only; do not put it in source control or a `VITE_` variable. `/health` reports whether the database can be reached and which storage mode is active. On Render, the service refuses to silently fall back to ephemeral SQLite if `DATABASE_URL` is missing.
 
-The Blueprint currently targets `main`. **Do not deploy until the required pull requests have been merged to main and the main-branch CI is green.** PR #5 is currently based on the OpenAI integration branch, so merge the dependency chain in order and verify the resulting main branch before creating the Render service. Do not deploy a stacked feature branch by guessing its runtime state.
+The `render.yaml` Blueprint includes a manual `DATABASE_URL` field. Inspect its resource plan and pricing before applying it; the current Blueprint still describes a paid service and a persistent disk. Existing SQLite rows are not automatically copied into Neon. Keep the old database backup until any records you need have been migrated.
 
-After the code is merged:
-
-1. Connect `omonux/agentforge` to Render as a Blueprint and inspect the planned resources.
-2. Confirm the deploy branch is `main`, the persistent disk is mounted at `/data`, and the health check is `/health`.
-3. Set the private owner password and AI API key when prompted; confirm generated session secrets are present.
-4. Add `SECRET_ENCRYPTION_KEY` as a private environment variable before saving any exchange or Telegram credentials.
-5. Keep live trading flags OFF. Do not add live exchange keys for the initial public demonstration.
-6. Deploy, then verify sign-in, sign-out, CSRF-protected writes, AI connection test, health check, SQLite persistence across redeploy, logs and backup/restore.
-7. Restrict access to the owner until the production security review is complete.
+Keep `LIVE_TRADING_ENABLED=false` and `BYBIT_LIVE_TRADING_ENABLED=false`. Neon provides durable app storage; it does not establish that a broker accepts protected orders or that automatic trading is safe.
 
 A successful CI build does not mean a Render service has been created or deployed.
 

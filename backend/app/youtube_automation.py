@@ -1,4 +1,5 @@
-import os, sqlite3, uuid, secrets, json, urllib.parse, asyncio, re, subprocess, shutil
+import os, uuid, secrets, json, urllib.parse, asyncio, re, subprocess, shutil
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import httpx
@@ -48,19 +49,21 @@ def ensure_daily_report_columns(connection):
     connection.commit()
 
 
+@contextmanager
 def conn():
  db_path=Path(os.getenv("DATABASE_PATH",str(app_main.DB)))
- db_path.parent.mkdir(parents=True,exist_ok=True); c=sqlite3.connect(db_path); c.row_factory=sqlite3.Row
- c.execute("""CREATE TABLE IF NOT EXISTS yt_settings(id INTEGER PRIMARY KEY CHECK(id=1),access_token TEXT,refresh_token TEXT,expires_at TEXT,channel_title TEXT,channel_id TEXT)""")
- c.execute("""CREATE TABLE IF NOT EXISTS yt_drafts(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,script TEXT NOT NULL,topic TEXT NOT NULL,video_path TEXT,thumbnail_path TEXT,status TEXT NOT NULL,privacy TEXT NOT NULL,created TEXT NOT NULL,published_url TEXT,published_at TEXT,error TEXT)""")
- c.execute("""CREATE TABLE IF NOT EXISTS yt_oauth_states(state TEXT PRIMARY KEY,created TEXT NOT NULL)""")
- columns={r["name"] for r in c.execute("PRAGMA table_info(yt_drafts)").fetchall()}
- for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT")):
-  if name not in columns: c.execute(f"ALTER TABLE yt_drafts ADD COLUMN {name} {definition}")
- settings_columns={r["name"] for r in c.execute("PRAGMA table_info(yt_settings)").fetchall()}
- for name,definition in (("telegram_daily_report_enabled","INTEGER NOT NULL DEFAULT 0"),("last_telegram_report_at","TEXT")):
-  if name not in settings_columns: c.execute(f"ALTER TABLE yt_settings ADD COLUMN {name} {definition}")
- c.commit(); return c
+ from .database import connect as connect_database
+ with connect_database(db_path) as c:
+  c.execute("""CREATE TABLE IF NOT EXISTS yt_settings(id INTEGER PRIMARY KEY CHECK(id=1),access_token TEXT,refresh_token TEXT,expires_at TEXT,channel_title TEXT,channel_id TEXT)""")
+  c.execute("""CREATE TABLE IF NOT EXISTS yt_drafts(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,script TEXT NOT NULL,topic TEXT NOT NULL,video_path TEXT,thumbnail_path TEXT,status TEXT NOT NULL,privacy TEXT NOT NULL,created TEXT NOT NULL,published_url TEXT,published_at TEXT,error TEXT)""")
+  c.execute("""CREATE TABLE IF NOT EXISTS yt_oauth_states(state TEXT PRIMARY KEY,created TEXT NOT NULL)""")
+  columns={r["name"] for r in c.execute("PRAGMA table_info(yt_drafts)").fetchall()}
+  for name,definition in (("voice_path","TEXT"),("captions_path","TEXT"),("render_prediction_url","TEXT")):
+   if name not in columns: c.execute(f"ALTER TABLE yt_drafts ADD COLUMN {name} {definition}")
+  settings_columns={r["name"] for r in c.execute("PRAGMA table_info(yt_settings)").fetchall()}
+  for name,definition in (("telegram_daily_report_enabled","INTEGER NOT NULL DEFAULT 0"),("last_telegram_report_at","TEXT")):
+   if name not in settings_columns: c.execute(f"ALTER TABLE yt_settings ADD COLUMN {name} {definition}")
+  yield c
 
 class Discover(BaseModel):
  query:str=Field(default="AI",min_length=1,max_length=100)

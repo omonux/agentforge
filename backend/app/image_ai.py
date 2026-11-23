@@ -1,4 +1,5 @@
-import base64, os, sqlite3, uuid
+import base64, os, uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import httpx
@@ -22,16 +23,16 @@ def image_config():
 STORE = Path(os.getenv("IMAGE_STORAGE_DIR", "./storage/generated_images")).resolve()
 MAX_BYTES = int(os.getenv("IMAGE_MAX_UPLOAD_BYTES", "12000000"))
 
+@contextmanager
 def connect():
     db_path = Path(os.getenv("DATABASE_PATH", str(app_main.DB)))
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(db_path); c.row_factory = sqlite3.Row
-    c.execute("""CREATE TABLE IF NOT EXISTS image_assets(
-      id TEXT PRIMARY KEY, prompt TEXT NOT NULL, model TEXT NOT NULL,
-      size TEXT NOT NULL, quality TEXT NOT NULL, filename TEXT NOT NULL,
-      created TEXT NOT NULL, revised_prompt TEXT)""")
-    c.commit()
-    return c
+    from .database import connect as connect_database
+    with connect_database(db_path) as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS image_assets(
+          id TEXT PRIMARY KEY, prompt TEXT NOT NULL, model TEXT NOT NULL,
+          size TEXT NOT NULL, quality TEXT NOT NULL, filename TEXT NOT NULL,
+          created TEXT NOT NULL, revised_prompt TEXT)""")
+        yield c
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=4000)
