@@ -3,8 +3,10 @@
 These endpoints query real exchange accounts but never submit, cancel, or amend orders.
 Use API keys with read-only permissions and withdrawals disabled.
 """
+import base64
 import hashlib
 import hmac
+from datetime import datetime, timezone
 import time
 from urllib.parse import urlencode
 
@@ -104,3 +106,59 @@ async def bybit_live_account():
         raise HTTPException(502, "Bybit rejected the live account check. Verify the LIVE key, secret, IP allowlist and read permission.")
     except (httpx.RequestError, ValueError, KeyError, TypeError):
         raise HTTPException(502, "Could not complete the Bybit live account check.")
+
+@router.post("/okx")
+async def okx_live_account():
+    """Read-only OKX balance check; this endpoint never submits or changes orders."""
+    api_key = read_secret("okx_live_api_key")
+    api_secret = read_secret("okx_live_api_secret")
+    passphrase = read_secret("okx_live_api_passphrase")
+    if not api_key or not api_secret or not passphrase:
+        raise HTTPException(409, "Save the OKX LIVE read-only key, secret and passphrase first.")
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    request_path = "/api/v5/account/balance"
+    prehash = timestamp + "GET" + request_path
+    signature = base64.b64encode(
+        hmac.new(api_secret.encode(), prehash.encode(), hashlib.sha256).digest()
+    ).decode()
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            response = await client.get(
+                "https://www.okx.com" + request_path,
+                headers={
+                    "OK-ACCESS-KEY": api_key,
+                    "OK-ACCESS-SIGN": signature,
+                    "OK-ACCESS-TIMESTAMP": timestamp,
+                    "OK-ACCESS-PASSPHRASE": passphrase,
+                },
+            )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") != "0":
+            raise HTTPException(502, "OKX rejected the read-only account check. Verify the key, passphrase, regional API domain and Read permission.")
+        account = (data.get("data") or [{}])[0]
+        balances = [
+            {
+                "currency": item.get("ccy"),
+                "equity": item.get("eq"),
+                "available_balance": item.get("availBal"),
+            }
+            for item in account.get("details", [])
+            if float(item.get("eq", 0) or 0) > 0
+        ]
+        return {
+            "connected": True,
+            "environment": "LIVE",
+            "exchange": "OKX",
+            "account_type": "Unified",
+            "total_equity": account.get("totalEq"),
+            "balances": balances,
+            "notice": "Real account data retrieved. This endpoint is read-only and did not place or change an order.",
+        }
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError:
+        raise HTTPException(502, "OKX rejected the read-only account check. Verify the key, passphrase, regional API domain and Read permission.")
+    except (httpx.RequestError, ValueError, KeyError, TypeError):
+        raise HTTPException(502, "Could not complete the OKX live account check.")
+
