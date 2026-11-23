@@ -13,6 +13,7 @@ type ExchangeKeyTableProps = {
   liveChecks: Record<string, { ok: boolean; detail: string }>;
   testing: string;
   onTest: (exchange: string) => void;
+  onRemove: (field: Field) => void;
 };
 
 function ExchangeKeyTable({ fields, values, onChange, liveChecks, testing, onTest, onRemove }: ExchangeKeyTableProps) {
