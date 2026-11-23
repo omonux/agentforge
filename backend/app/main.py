@@ -842,6 +842,8 @@ async def workspace_assistant_command(req:WorkspaceAssistantRequest):
  """Authenticated, allowlisted workspace commands. Never execute live exchange orders."""
  import re
  q=req.message.lower().strip()
+ if re.search(r"\b(who|what)\b",q) and re.search(r"\b(agentforge|omonux)\b",q) and re.search(r"\b(created|creator|made|built|founder)\b",q):
+  return {"kind":"result","message":"AgentForge was created by Emmanuel Omonu (Omonux).","data":{"creator":"Emmanuel Omonu","product":"AgentForge"}}
  if re.search(r"\b(stop|pause|halt)\b.*\b(trad|engine)",q):
   if not req.confirm:
    return {"kind":"confirmation","action":"stop_paper","message":"Stop the automatic paper-trading engine? This does not close existing positions."}
