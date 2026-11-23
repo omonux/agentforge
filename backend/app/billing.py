@@ -8,7 +8,6 @@ import hmac
 import json
 import os
 import secrets
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,6 +16,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from .omonux_integrations import secret_or_env
+from .database import connect as connect_database
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 DB = Path(os.getenv("DATABASE_PATH", "./agentforge.db"))
@@ -24,10 +24,7 @@ PLAN_KEYS = ("pro_monthly", "business_monthly")
 
 
 def _db():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB, timeout=15)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_database(DB)
 
 
 def init_billing_db():

@@ -1,4 +1,4 @@
-import os, sqlite3, uuid, asyncio
+import os, uuid, asyncio
 from .omonux_engine import fetch_candles, build_signal, validate_symbol
 from .omonux_forex import router as forex_router
 from .omonux_backtest import backtest_closed_candles
@@ -14,6 +14,7 @@ from .omonux_live_books import scan_live_books
 from .omonux_council import run_council
 from .omonux_research import router as omonux_research_router
 from pathlib import Path
+from .database import connect as connect_database, integrity_error_types, is_postgres
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 import httpx
@@ -35,7 +36,7 @@ AGENTS={
 }
 def stamp(): return datetime.now(timezone.utc).isoformat()
 def db():
- DB.parent.mkdir(parents=True,exist_ok=True); c=sqlite3.connect(DB); c.row_factory=sqlite3.Row; return c
+ return connect_database(DB)
 @asynccontextmanager
 async def life(app):
  with db() as c:
@@ -185,7 +186,14 @@ async def ask(agent,prompt):
 @app.get("/health")
 def health():
  base,key,model=current_ai_config()
- return {"status":"ok","ai_configured":bool(base and key and model)}
+ try:
+  with db() as conn: conn.execute("SELECT 1").fetchone()
+  database_connected=True
+ except Exception:
+  database_connected=False
+ return {"status":"ok" if database_connected else "degraded","database_connected":database_connected,
+         "storage":"neon_postgres" if is_postgres() or os.getenv("RENDER", "").lower()=="true" else "local_sqlite",
+         "ai_configured":bool(base and key and model)}
 
 # --- AI provider diagnostics (never return credentials) ---
 @app.get("/api/v1/workspace/overview")
@@ -510,7 +518,7 @@ def add_watch(x:WatchItem):
  ident=str(uuid.uuid4())
  try:
   with db() as c: c.execute("INSERT INTO watchlist VALUES(?,?,?,?)",(ident,x.symbol.upper(),x.note,stamp()))
- except sqlite3.IntegrityError: raise HTTPException(409,"Symbol is already on the watchlist.")
+ except integrity_error_types(): raise HTTPException(409,"Symbol is already on the watchlist.")
  return one("SELECT * FROM watchlist WHERE id=?",(ident,))
 @app.delete("/api/v1/trading/watchlist/{ident}")
 def delete_watch(ident:str):
