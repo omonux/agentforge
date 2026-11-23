@@ -69,15 +69,18 @@ SERVICES = [
         {"name":"opay_api_base_url","label":"OPay API base URL","kind":"text","required":False,"help":"Use the sandbox URL until merchant approval."},
         {"name":"opay_country","label":"OPay country code","kind":"text","required":False,"help":"Default: NG."},
         {"name":"opay_currency","label":"OPay currency","kind":"text","required":False,"help":"Default: NGN."}]},
-    {"id":"trading","name":"Exchange Credentials (Restricted)","group":"Business services","description":"Credentials are stored encrypted. This does not turn on live trading; use testnet and keep live execution disabled.","testable":False,"fields":[
-        {"name":"binance_api_key","label":"Binance testnet API key","kind":"secret","required":False,"help":"Use testnet credentials with withdrawals disabled."},
-        {"name":"binance_api_secret","label":"Binance testnet API secret","kind":"secret","required":False,"help":"Never use a withdrawal-enabled key."},
-        {"name":"bybit_api_key","label":"Bybit testnet API key","kind":"secret","required":False,"help":"Use testnet credentials only."},
-        {"name":"bybit_api_secret","label":"Bybit testnet API secret","kind":"secret","required":False,"help":"Never use a withdrawal-enabled key."},
-        {"name":"binance_live_api_key","label":"Binance LIVE read-only API key","kind":"secret","required":False,"help":"Only use a separate read-only key. Live order execution remains disabled here."},
-        {"name":"binance_live_api_secret","label":"Binance LIVE read-only API secret","kind":"secret","required":False,"help":"Use IP restrictions and disable withdrawals."},
-        {"name":"bybit_live_api_key","label":"Bybit LIVE read-only API key","kind":"secret","required":False,"help":"Only use a separate read-only key. Live order execution remains disabled here."},
-        {"name":"bybit_live_api_secret","label":"Bybit LIVE read-only API secret","kind":"secret","required":False,"help":"Use IP restrictions and disable withdrawals."}]},
+    {"id":"trading","name":"Crypto Exchange Connections","group":"Exchange APIs","description":"Connect Binance, Bybit and OKX. Credentials are encrypted. Production account checks are read-only and never place or manage orders.","testable":False,"fields":[
+        {"name":"binance_api_key","label":"Binance testnet API key","kind":"secret","required":False,"help":"Testnet key only. No real funds."},
+        {"name":"binance_api_secret","label":"Binance testnet API secret","kind":"secret","required":False,"help":"Testnet secret. Never enable withdrawals."},
+        {"name":"binance_live_api_key","label":"Binance LIVE read-only API key","kind":"secret","required":False,"help":"Use account read permission only. Disable trading and withdrawals."},
+        {"name":"binance_live_api_secret","label":"Binance LIVE read-only API secret","kind":"secret","required":False,"help":"Separate production read-only key; restrict by IP where possible."},
+        {"name":"bybit_api_key","label":"Bybit testnet API key","kind":"secret","required":False,"help":"Testnet key only. No real funds."},
+        {"name":"bybit_api_secret","label":"Bybit testnet API secret","kind":"secret","required":False,"help":"Testnet secret. Never enable withdrawals."},
+        {"name":"bybit_live_api_key","label":"Bybit LIVE read-only API key","kind":"secret","required":False,"help":"Enable Read only only. Do not grant Trade or Withdraw."},
+        {"name":"bybit_live_api_secret","label":"Bybit LIVE read-only API secret","kind":"secret","required":False,"help":"Separate production read-only secret; use IP restrictions."},
+        {"name":"okx_live_api_key","label":"OKX LIVE read-only API key","kind":"secret","required":False,"help":"Enable Read permission only. Do not grant Trade or Withdraw."},
+        {"name":"okx_live_api_secret","label":"OKX LIVE read-only API secret","kind":"secret","required":False,"help":"Separate production read-only secret; bind it to the service IP if supported."},
+        {"name":"okx_live_api_passphrase","label":"OKX API passphrase","kind":"secret","required":False,"help":"The passphrase created with this OKX API key; store it only in this encrypted connection form."}]},
 ]
 
 ENV_FALLBACKS = {
@@ -98,6 +101,7 @@ ENV_FALLBACKS = {
     "opay_country":"OPAY_COUNTRY","opay_currency":"OPAY_CURRENCY",
     "binance_api_key":"","binance_api_secret":"","bybit_api_key":"","bybit_api_secret":"",
     "binance_live_api_key":"","binance_live_api_secret":"","bybit_live_api_key":"","bybit_live_api_secret":"",
+    "okx_live_api_key":"","okx_live_api_secret":"","okx_live_api_passphrase":"",
 }
 
 class SecretInput(BaseModel):
