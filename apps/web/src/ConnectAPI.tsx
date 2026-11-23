@@ -15,7 +15,7 @@ type ExchangeKeyTableProps = {
   onTest: (exchange: string) => void;
 };
 
-function ExchangeKeyTable({ fields, values, onChange, liveChecks, testing, onTest }: ExchangeKeyTableProps) {
+function ExchangeKeyTable({ fields, values, onChange, liveChecks, testing, onTest, onRemove }: ExchangeKeyTableProps) {
   const fieldByName = (name: string) => fields.find(field => field.name === name);
   const rows = [
     { exchange: "Binance", id: "binance", environment: "Testnet", key: "binance_api_key", secret: "binance_api_secret", live: false },
@@ -29,7 +29,7 @@ function ExchangeKeyTable({ fields, values, onChange, liveChecks, testing, onTes
     if (!field) return <span>Not available</span>;
     return <div className="exchange-key-field">
       <label htmlFor={field.name}>{field.label}</label>
-      <input id={field.name} type="password" autoComplete="off" value={values[field.name] ?? ""} onChange={event => onChange(field.name, event.target.value)} placeholder={field.configured ? "Saved securely · enter to replace" : "Paste key here"} />
+      <div className="exchange-input-row"><input id={field.name} type="password" autoComplete="off" value={values[field.name] ?? ""} onChange={event => onChange(field.name, event.target.value)} placeholder={field.configured ? "Saved securely · enter to replace" : "Paste key here"} />{field.configured && <button className="connect-icon-button" type="button" title={"Remove " + field.label} onClick={() => onRemove(field)}><Trash2 size={13}/></button>}</div>
       <small>{field.configured ? "Saved securely" : field.help}</small>
     </div>;
   };
@@ -48,7 +48,8 @@ function ExchangeKeyTable({ fields, values, onChange, liveChecks, testing, onTes
         </tr>;
       })}</tbody>
     </table>
-    <p className="exchange-table-note">Live account checks are read-only: they verify API access and do not place, change or cancel orders. The testnet keys are stored separately.</p>
+    <div className="exchange-doc-links"><span>Official setup guides:</span><a href="https://www.binance.com/en/support/faq/detail/360002502072" target="_blank" rel="noreferrer">Binance API keys</a><a href="https://www.bybit.com/en/help-center/article/How-to-create-your-API-key" target="_blank" rel="noreferrer">Bybit API keys</a><a href="https://www.okx.com/docs-v5/en/" target="_blank" rel="noreferrer">OKX API guide</a></div>
+    <p className="exchange-table-note">Live account checks are read-only: they verify API access and do not place, change or cancel orders. Testnet keys are separate. To verify Binance or Bybit testnet keys, open Omonux Trading. PayPal is not configured in AgentForge; billing uses Paystack and OPay.</p>
   </div>;
 }
 
@@ -180,7 +181,7 @@ export default function ConnectAPI({ onNotice }: Props) {
           <span className={"connect-state " + (service.check?.status === "connected" ? "connected" : service.configured ? "configured" : "missing")}>{service.check?.status === "connected" ? "Test passed" : service.check?.status === "manual" ? "Manual verification" : service.configured ? "Configured" : "Needs setup"}</span>
         </div>
         {service.id === "ai" && <div style={{padding:"0 18px 12px"}}><button type="button" className="connect-refresh" onClick={useGemini}>Use free-tier Google Gemini</button><small style={{display:"block",marginTop:8}}>Fills the Gemini base URL and model only. Paste your own Gemini API key below, then save all three fields together. This replaces the active chat provider settings, not the image provider.</small></div>}
-        {service.id === "trading" ? <ExchangeKeyTable fields={service.fields} values={values} liveChecks={liveChecks} testing={testing} onTest={checkLiveExchange} onChange={(name, value) => { setValues(current => ({ ...current, [name]: value })); setEdited(current => ({ ...current, [name]: true })); }} /> : <div className="connect-fields">
+        {service.id === "trading" ? <ExchangeKeyTable fields={service.fields} values={values} liveChecks={liveChecks} testing={testing} onTest={checkLiveExchange} onRemove={removeField} onChange={(name, value) => { setValues(current => ({ ...current, [name]: value })); setEdited(current => ({ ...current, [name]: true })); }} /> : <div className="connect-fields">
           {service.fields.map(field => <div className="connect-field" key={field.name}>
             <label htmlFor={field.name}>{field.label}{field.required && <i>Required</i>}</label>
             <div className="connect-input-row">
