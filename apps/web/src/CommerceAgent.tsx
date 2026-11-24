@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertCircle, ArrowUpRight, BadgeCheck, CheckCircle2, CircleDollarSign, Copy, ExternalLink, Globe2, LoaderCircle, PackageSearch, Plus, RefreshCw, Search, ShieldCheck, Sparkles, Store, Trash2 } from "lucide-react";
 import { API, apiFetch } from "./api";
 import CommerceInbox from "./CommerceInbox";
+import CommerceMetaMarketing from "./CommerceMetaMarketing";
 import CommerceAssetDesk from "./CommerceAssetDesk";
 import "./commerce-agent.css";
 
@@ -136,6 +137,7 @@ export default function CommerceAgent({ onNotice, onNavigate }: { onNotice?: (me
           {p.status==="shopify_draft"&&<><span className="commerce-draft-badge"><CheckCircle2 size={14}/> Draft in Shopify</span><button className="secondary" onClick={()=>void generateCopy(p)}><Sparkles size={14}/> Copy / promote</button></>}
         </div></article>)}</div>}
     </section>
+    <CommerceMetaMarketing products={data?.products||[]}/>
     <section className="panel commerce-panel"><div className="commerce-panel-head"><div><span className="commerce-eyebrow">ACTIVITY</span><h3>Agent journal</h3></div><Activity size={19}/></div>{!(data?.events||[]).length?<p className="commerce-muted">Discovery, pricing and channel actions will appear here.</p>:<div className="commerce-event-list">{data?.events.map((ev:any)=><div className="commerce-event" key={ev.id}><i/><span><b>{ev.message}</b><small>{ev.event_type.replace(/_/g," ")} · {new Date(ev.created).toLocaleString()}</small></span></div>)}</div>}</section>
     <div className="commerce-footer-note"><ShieldCheck size={15}/> CJ catalog search and warehouse snapshots are live when connected. Each imported item still needs destination shipping, variant, resale terms and final margin verified. Shopify listings remain drafts; supplier purchases, order fulfillment, payouts and public comments are not automated.</div>
   </div>;

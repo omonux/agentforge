@@ -1274,6 +1274,8 @@ app.include_router(workflow_runs_router)
 # Multi-channel commerce discovery, pricing, copy and account-authorized drafts.
 from .commerce_agent import router as commerce_agent_router
 app.include_router(commerce_agent_router)
+from .commerce_meta import router as commerce_meta_router
+app.include_router(commerce_meta_router)
 
 
 # OMONUX 50-market discovery API. Research-only; this route cannot place orders.
