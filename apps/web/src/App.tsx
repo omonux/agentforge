@@ -23,7 +23,46 @@ const roomHelp:Record<string,{purpose:string;steps:string[];note:string}>={
 function RoomGuide({page}:{page:string}){const[open,setOpen]=useState(false);const info=roomHelp[page];return <div className="room-guide"><div className="room-guide-top"><div><span className="room-guide-eyebrow">YOUR {page.toUpperCase()} ROOM</span><h2>What this room is for</h2><p>{info.purpose}</p></div><button type="button" className="room-guide-toggle" aria-expanded={open} onClick={()=>setOpen(v=>!v)}>{open?"Hide instructions":"How to use this room"} <ChevronDown size={16}/></button></div>{open&&<div className="room-guide-details"><ol>{info.steps.map((step,i)=><li key={i}>{step}</li>)}</ol><p><ShieldCheck size={16}/>{info.note}</p></div>}</div>}
 export default function App(){const[auth,setAuth]=useState<"checking"|"signedout"|"signedin">("checking"),[password,setPassword]=useState(""),[loginError,setLoginError]=useState(""),[loginBusy,setLoginBusy]=useState(false);const[assistantOpen,AO]=useState(false),[assistantBusy,AB]=useState(false),[assistantPending,AP]=useState<string|null>(null),[assistantQuery,AQ]=useState(""),[assistantReply,AR]=useState("AgentForge was created by Emmanuel Omonu. Choose a workspace room, ask for status, or create an AI task."),[page,P]=useState(new URLSearchParams(window.location.search).get("commerce")==="shopify_connected"?"Commerce Agent":"Overview"),[openedRoom,OR]=useState<string|null>(new URLSearchParams(window.location.search).get("commerce")==="shopify_connected"?"Commerce Agent":"Overview"),[tasks,T]=useState<any[]>([]),[online,O]=useState(false),[storageState,DS]=useState("checking"),[aiConfigured,AI]=useState(false),[aiTesting,AT]=useState(false),[modal,M]=useState(false),[agent,A]=useState("research"),[title,S]=useState(""),[prompt,Q]=useState(""),[busy,B]=useState(false),[notice,N]=useState(""),[trades,TR]=useState<any[]>([]),[symbol,SY]=useState("BTCUSD"),[side,SD]=useState("buy"),[qty,QY]=useState("0.01"),[price,PR]=useState("60000"),[launcher,LA]=useState(false);
 useEffect(()=>{if(page==="Commerce Agent"&&new URLSearchParams(window.location.search).get("commerce")==="shopify_connected"){N("Shopify account connected. Product API access is authorized.");window.history.replaceState({},document.title,"/");}},[page]);
-async function refresh(){if(auth!=="signedin")return;try{let[h,t]=await Promise.all([apiFetch(API+"/health"),apiFetch(API+"/api/v1/tasks")]);if(h.ok){const health=await h.json();O(health.database_connected!==false);DS(health.storage??"unknown");AI(Boolean(health.ai_configured))}else{O(false);DS("offline")}if(t.ok)T(await t.json())}catch{O(false);DS("offline")}}useEffect(()=>{apiFetch(API+"/api/v1/auth/me").then(r=>setAuth(r.ok?"signedin":"signedout")).catch(()=>setAuth("signedout"))},[]);useEffect(()=>{if(auth!=="signedin")return;refresh();let id=setInterval(refresh,12000);return()=>clearInterval(id)},[auth]);useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();LA(v=>!v)}if(e.key==="Escape")LA(false)};window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey)},[]);
+async function refresh() {
+ const healthRequest = apiFetch(API + "/health", {signal: AbortSignal.timeout(15_000)})
+  .then(async response => {
+   if (!response.ok) throw new Error("Health check failed");
+   const health = await response.json();
+   O(health.database_connected !== false);
+   DS(health.storage ?? "unknown");
+   AI(Boolean(health.ai_configured));
+  }).catch(() => {
+   O(false);
+   DS("offline");
+  });
+ const tasksRequest = apiFetch(API + "/api/v1/tasks", {signal: AbortSignal.timeout(15_000)})
+  .then(async response => {
+   if (response.ok) T(await response.json());
+  });
+ await Promise.allSettled([healthRequest, tasksRequest]);
+}
+useEffect(()=>{apiFetch(API+"/api/v1/auth/me").then(r=>setAuth(r.ok?"signedin":"signedout")).catch(()=>setAuth("signedout"))},[]);
+useEffect(() => {
+ if (auth !== "signedin") return;
+ let inFlight = false;
+ async function refreshVisibleWorkspace() {
+  if (document.hidden || inFlight) return;
+  inFlight = true;
+  try {
+   await refresh();
+  } finally {
+   inFlight = false;
+  }
+ }
+ void refreshVisibleWorkspace();
+ const timer = window.setInterval(refreshVisibleWorkspace, 30_000);
+ document.addEventListener("visibilitychange", refreshVisibleWorkspace);
+ return () => {
+  window.clearInterval(timer);
+  document.removeEventListener("visibilitychange", refreshVisibleWorkspace);
+ };
+}, [auth]);
+useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();LA(v=>!v)}if(e.key==="Escape")LA(false)};window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey)},[]);
 async function run(e:React.FormEvent){e.preventDefault();B(true);N("");try{let r=await apiFetch(API+"/api/v1/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({agent,title,prompt})});let d=await r.json();if(!r.ok)throw Error(d.detail||"Task failed");N("Task completed and saved.");S("");Q("");M(false);refresh()}catch(e){N(e instanceof Error?e.message:"API unavailable")}finally{B(false)}}
 async function testAI(){AT(true);N("");try{const r=await apiFetch(API+"/api/v1/ai/test",{method:"POST"});const d=await r.json();if(!r.ok)throw Error(d.detail||"AI connection test failed");AI(true);N("OpenAI connection successful · "+d.model)}catch(e){N(e instanceof Error?e.message:"AI connection test failed")}finally{AT(false)}}
 async function paper(e:React.FormEvent){e.preventDefault();try{let r=await apiFetch(API+"/api/v1/trading/paper/trades",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol,side,quantity:Number(qty),reference_price:Number(price)})});let d=await r.json();if(!r.ok)throw Error(d.detail);N("Paper trade recorded. No real order was placed.");let q=await apiFetch(API+"/api/v1/trading/paper/trades");if(q.ok)TR(await q.json())}catch(e){N(e instanceof Error?e.message:"Trading API unavailable")}}
