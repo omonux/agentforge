@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, RefreshCw, ShieldCheck, TrendingDown, TrendingUp } from "lucide-react";
 import { apiFetch, API } from "./api";
 import "./omonux-live-research.css";
@@ -57,38 +57,65 @@ export default function OmonuxLiveResearch() {
   const [updated, setUpdated] = useState<string | null>(null);
   const [error, setError] = useState("");
 
+  const inFlight = useRef(false);
+
   const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError("");
-    const next: ResearchCard[] = [];
-    try {
-      const response = await apiFetch(API + "/api/v1/trading/signals?symbols=" + cryptoSymbols + "&interval=30m");
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.detail || "Crypto market data is unavailable");
-      for (const item of data?.signals ?? []) {
-        if (item?.status === "unavailable") {
-          next.push({ symbol: item.symbol, market: "CRYPTO", error: item.error || "Market data unavailable" });
-        } else next.push(signalCard(item.symbol, "CRYPTO", item));
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Crypto research unavailable");
-      for (const symbol of cryptoSymbols.split(",")) next.push({ symbol, market: "CRYPTO", error: "Could not retrieve fresh market data" });
+
+    function showResults(market: ResearchCard["market"], results: ResearchCard[]) {
+      setCards(previous => {
+        const otherMarket = previous.filter(card => card.market !== market);
+        return market === "CRYPTO" ? [...results, ...otherMarket] : [...otherMarket, ...results];
+      });
+      setUpdated(new Date().toLocaleTimeString());
     }
 
-    const forex = await Promise.all(forexSymbols.map(async symbol => {
+    async function loadCrypto() {
       try {
-        const response = await apiFetch(API + "/api/v1/trading/forex/research/" + symbol + "?timeframe=M30&hours=168");
+        const response = await apiFetch(API + "/api/v1/trading/signals?symbols=" + cryptoSymbols + "&interval=30m", {
+          signal: AbortSignal.timeout(20_000),
+        });
         const data = await response.json();
-        if (!response.ok) throw new Error(data?.detail || "Forex research unavailable");
-        return signalCard(symbol, "FOREX", data);
+        if (!response.ok) throw new Error(data?.detail || "Crypto market data is unavailable");
+        const results: ResearchCard[] = (data?.signals ?? []).map((item: any) =>
+          item.status === "unavailable"
+            ? { symbol: item.symbol, market: "CRYPTO", error: item.error || "Market data unavailable" }
+            : signalCard(item.symbol, "CRYPTO", item)
+        );
+        showResults("CRYPTO", results);
       } catch (e) {
-        return { symbol, market: "FOREX" as const, error: e instanceof Error ? e.message : "TickerAll research unavailable" };
+        setError(e instanceof Error ? e.message : "Crypto research unavailable");
+        showResults("CRYPTO", cryptoSymbols.split(",").map(symbol => ({
+          symbol, market: "CRYPTO", error: "Could not retrieve fresh market data",
+        })));
       }
-    }));
-    next.push(...forex);
-    setCards(next);
-    setUpdated(new Date().toLocaleTimeString());
-    setBusy(false);
+    }
+
+    async function loadForex() {
+      const results = await Promise.all(forexSymbols.map(async symbol => {
+        try {
+          const response = await apiFetch(API + "/api/v1/trading/forex/research/" + symbol + "?timeframe=M30&hours=168", {
+            signal: AbortSignal.timeout(20_000),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data?.detail || "Forex research unavailable");
+          return signalCard(symbol, "FOREX", data);
+        } catch (e) {
+          return { symbol, market: "FOREX" as const, error: e instanceof Error ? e.message : "TickerAll research unavailable" };
+        }
+      }));
+      showResults("FOREX", results);
+    }
+
+    try {
+      await Promise.all([loadCrypto(), loadForex()]);
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
   }, []);
 
   useEffect(() => {
