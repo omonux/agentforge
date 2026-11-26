@@ -41,7 +41,20 @@ async function refresh() {
   });
  await Promise.allSettled([healthRequest, tasksRequest]);
 }
-useEffect(()=>{apiFetch(API+"/api/v1/auth/me").then(r=>setAuth(r.ok?"signedin":"signedout")).catch(()=>setAuth("signedout"))},[]);
+useEffect(()=>{
+ const controller = new AbortController();
+ const timer = window.setTimeout(() => controller.abort(), 20_000);
+ apiFetch(API+"/api/v1/auth/me", {signal:controller.signal})
+  .then(response => {
+   if (response.status !== 401 && !response.ok) throw new Error("Session check failed");
+   setAuth(response.ok ? "signedin" : "signedout");
+  })
+  .catch(() => {
+   setLoginError("Could not check your session. Reload the page or try signing in again.");
+   setAuth("signedout");
+  })
+  .finally(() => window.clearTimeout(timer));
+},[]);
 useEffect(() => {
  if (auth !== "signedin") return;
  let inFlight = false;
