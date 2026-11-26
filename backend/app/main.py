@@ -40,6 +40,7 @@ def db():
 @asynccontextmanager
 async def life(app):
  with db() as c:
+  c.execute("CREATE TABLE IF NOT EXISTS integration_secrets (name TEXT PRIMARY KEY, ciphertext BLOB NOT NULL, updated TEXT NOT NULL)")
   c.execute("CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, agent TEXT, title TEXT, prompt TEXT, status TEXT, result TEXT, error TEXT, created TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS paper_trades(id TEXT PRIMARY KEY,symbol TEXT,side TEXT,qty REAL,price REAL,created TEXT)")
   c.execute("CREATE TABLE IF NOT EXISTS leads(id TEXT PRIMARY KEY,name TEXT NOT NULL,email TEXT,company TEXT,stage TEXT NOT NULL,notes TEXT,created TEXT,updated TEXT)")
@@ -185,15 +186,20 @@ async def ask(agent,prompt):
  except Exception: raise HTTPException(502,"AI provider request failed or returned an invalid response.")
 @app.get("/health")
 def health():
- base,key,model=current_ai_config()
+ ai_settings = {"ai_base_url": "AI_BASE_URL", "ai_api_key": "AI_API_KEY", "ai_model": "AI_MODEL"}
+ ai_configured = False
  try:
-  with db() as conn: conn.execute("SELECT 1").fetchone()
-  database_connected=True
+  with db() as conn:
+   saved = {row["name"] for row in conn.execute(
+    "SELECT name FROM integration_secrets WHERE name IN (?, ?, ?)", tuple(ai_settings)
+   ).fetchall()}
+  database_connected = True
+  ai_configured = all(name in saved or bool(os.getenv(env, "").strip()) for name, env in ai_settings.items())
  except Exception:
-  database_connected=False
+  database_connected = False
  return {"status":"ok" if database_connected else "degraded","database_connected":database_connected,
          "storage":"neon_postgres" if is_postgres() or os.getenv("RENDER", "").lower()=="true" else "local_sqlite",
-         "ai_configured":bool(base and key and model)}
+         "ai_configured":ai_configured}
 
 # --- AI provider diagnostics (never return credentials) ---
 @app.get("/api/v1/workspace/overview")
